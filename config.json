@@ -23,5 +23,19 @@
     "lat_max": 37.0,
     "lon_min": -114.8,
     "lon_max": -109.0
+  },
+  "deauth_detection": {
+    "enabled": true,
+    "burst_threshold": 10,
+    "burst_window_seconds": 60,
+    "min_events_for_attack": 5,
+    "scan_interval_minutes": 5,
+    "protected_macs": []
+  },
+  "rogue_ap_detection": {
+    "enabled": true,
+    "auto_learn": true,
+    "monitored_ssids": [],
+    "trusted_aps": []
   }
 }

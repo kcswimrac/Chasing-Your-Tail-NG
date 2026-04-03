@@ -119,10 +119,48 @@ python3 surveillance_analyzer.py --output-json analysis_results.json
 python3 surveillance_analyzer.py --gps-file gps_coordinates.json
 ```
 
+### Deauth Attack Detection
+```bash
+# Detect deauthentication/disassociation attacks from Kismet data
+# Can also be run from the GUI via the "Deauth Detection" button
+python3 -c "
+from deauth_detector import run_deauth_scan
+import json
+config = json.load(open('config.json'))
+events, attacks, report = run_deauth_scan(config, '/path/to/kismet.db')
+print(f'Events: {len(events)}, Attacks: {len(attacks)}, Report: {report}')
+"
+```
+
+**Configuration** (`config.json` > `deauth_detection`):
+- `protected_macs`: List of YOUR device MAC addresses to prioritize monitoring
+- `burst_threshold`: Deauth frames/min to classify as flood (default: 10)
+- `min_events_for_attack`: Minimum events to confirm attack pattern (default: 5)
+
+### Rogue AP / Evil Twin Detection
+```bash
+# Detect rogue access points spoofing your known SSIDs
+# Can also be run from the GUI via the "Rogue AP Detection" button
+python3 -c "
+from rogue_ap_detector import run_rogue_ap_scan
+import json
+config = json.load(open('config.json'))
+alerts, report = run_rogue_ap_scan(config, '/path/to/kismet.db')
+print(f'Alerts: {len(alerts)}, Report: {report}')
+"
+```
+
+**Configuration** (`config.json` > `rogue_ap_detection`):
+- `monitored_ssids`: List of SSID names to watch for impersonation
+- `trusted_aps`: List of known-good AP profiles: `{"ssid": "MyWiFi", "bssid": "AA:BB:CC:DD:EE:FF", "encryption": "WPA2", "channel": 6}`
+- `auto_learn`: When true, automatically learns AP profiles on first scan (default: true)
+
 ### GUI Features
 The enhanced GUI (`cyt_gui.py`) now includes:
 - **🗺️ Surveillance Analysis** button - Runs GPS-correlated persistence detection with advanced KML visualization
 - **📈 Analyze Logs** button - Analyzes historical probe request data
+- **🛡️ Deauth Detection** button - Scans for deauthentication/disassociation attacks against your devices
+- **📡 Rogue AP Detection** button - Detects evil twin attacks and rogue APs spoofing your SSIDs
 - **Real-time GPS integration** - Automatically uses Bluetooth GPS data from Kismet
 - **Spectacular KML generation** - Creates professional Google Earth visualizations with threat-level styling
 
@@ -150,7 +188,7 @@ python3 legacy/create_ignore_list.py  # Moved to legacy folder
 ### Project Structure & Key File Locations
 
 #### Core Files (Main Directory) - CLEANED July 23, 2025
-- **Core Python Scripts**: `chasing_your_tail.py`, `surveillance_analyzer.py`, `cyt_gui.py`, `probe_analyzer.py`, `gps_tracker.py`, `surveillance_detector.py`
+- **Core Python Scripts**: `chasing_your_tail.py`, `surveillance_analyzer.py`, `cyt_gui.py`, `probe_analyzer.py`, `gps_tracker.py`, `surveillance_detector.py`, `deauth_detector.py`, `rogue_ap_detector.py`
 - **Security Modules**: `secure_*.py` (4 files), `input_validation.py`, `migrate_credentials.py`
 - **Configuration**: `config.json`, `requirements.txt`
 - **Working Startup Scripts**: `start_kismet_clean.sh` (Kismet), `start_gui.sh` (GUI)
@@ -205,6 +243,26 @@ Advanced persistence detection algorithms analyze device behavior patterns:
 - **Timing Analysis**: Detects unusual appearance timing (work hours, off-hours, regular intervals)
 - **Persistence Scoring**: Assigns weighted scores (0-1.0) based on combined indicators
 - **Multi-location Tracking**: Specialized algorithms for detecting following behavior across locations
+
+### Deauthentication Attack Detection
+Monitors Kismet data for deauth/disassociation attacks targeting your devices:
+- **Kismet Alerts Table**: Parses Kismet's built-in DEAUTHFLOOD, DISASSOCIATION alerts
+- **Device JSON Analysis**: Detects high retry rates indicating active RF interference
+- **Burst Detection**: Identifies flood patterns (configurable threshold, default 10 frames/min)
+- **Attack Correlation**: Groups individual deauth frames into confirmed attack patterns
+- **Severity Classification**: LOW/MEDIUM/HIGH/CRITICAL based on rate, frame count, and protected device targeting
+- **Protected Device Priority**: Configure your own MAC addresses for elevated alerting
+- **802.11 Reason Code Tracking**: Logs deauth reason codes per the IEEE 802.11 standard
+
+### Rogue AP / Evil Twin Detection
+Detects rogue access points spoofing your known SSIDs:
+- **BSSID Mismatch Detection**: Flags unknown BSSIDs advertising your trusted SSIDs (evil twin)
+- **Encryption Downgrade Detection**: Alerts when a known SSID appears with weaker encryption (e.g., WPA2 -> Open)
+- **Channel Anomaly Detection**: Flags trusted SSIDs appearing on unexpected channels
+- **Auto-Learn Mode**: Automatically builds AP profiles on first scan, then alerts on changes
+- **Trusted AP Profiles**: Configure known-good SSID/BSSID/encryption/channel combinations
+- **Kismet Alert Integration**: Parses APSPOOF, CRYPTODROP, BEACONCHANGE alerts from Kismet
+- **Reports**: Generates markdown reports with countermeasure recommendations
 
 ### GPS Integration & Spectacular KML Export
 - **Location Clustering**: Groups nearby GPS coordinates (configurable threshold)

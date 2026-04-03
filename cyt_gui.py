@@ -269,6 +269,42 @@ class CYTGui:
             command=self.quit_application
         )
         self.quit_btn.pack(side=tk.RIGHT)
+
+        # Defense row buttons (deauth detection + rogue AP detection)
+        defense_row = tk.Frame(controls_frame, bg='#2a2a2a')
+        defense_row.pack(fill=tk.X, pady=(10, 0))
+
+        # Deauth detection button
+        self.deauth_btn = tk.Button(
+            defense_row,
+            text="🛡️ Deauth\nDetection",
+            font=('Arial', 9, 'bold'),
+            width=12,
+            height=2,
+            fg='#ffffff',
+            bg='#e83e8c',
+            activebackground='#c2185b',
+            relief='raised',
+            bd=3,
+            command=self.deauth_detection_threaded
+        )
+        self.deauth_btn.pack(side=tk.LEFT, padx=(0, 10))
+
+        # Rogue AP detection button
+        self.rogue_ap_btn = tk.Button(
+            defense_row,
+            text="📡 Rogue AP\nDetection",
+            font=('Arial', 9, 'bold'),
+            width=12,
+            height=2,
+            fg='#ffffff',
+            bg='#fd7e14',
+            activebackground='#e06600',
+            relief='raised',
+            bd=3,
+            command=self.rogue_ap_detection_threaded
+        )
+        self.rogue_ap_btn.pack(side=tk.LEFT, padx=(0, 10))
         
     def create_log_section(self, parent):
         """Create log output section"""
@@ -697,6 +733,121 @@ class CYTGui:
         finally:
             self.surveillance_btn.config(state='normal', text='🗺️ Surveillance\nAnalysis')
             
+    def deauth_detection_threaded(self):
+        """Run deauth detection in background"""
+        self.log_message("🛡️ Starting deauthentication attack detection...")
+        self.deauth_btn.config(state='disabled', text='Scanning...')
+        threading.Thread(target=self._deauth_detection_background, daemon=True).start()
+
+    def _deauth_detection_background(self):
+        """Background deauth detection"""
+        try:
+            # Load config
+            if not self.config:
+                with open('config.json', 'r') as f:
+                    self.config = json.load(f)
+
+            # Find latest Kismet database
+            db_file, error = self.check_kismet_db()
+            if error:
+                self.log_message(f"❌ Database error: {error}")
+                return
+
+            self.log_message(f"📊 Scanning database: {os.path.basename(db_file)}")
+
+            from deauth_detector import DeauthDetector
+            detector = DeauthDetector(self.config)
+            events = detector.scan_kismet_db(db_file)
+            attacks = detector.analyze_attacks()
+
+            # Display results
+            if not events:
+                self.log_message("✅ No deauthentication events detected")
+                self.log_message("   Your wireless environment appears clean")
+            else:
+                self.log_message(f"📊 Found {len(events)} deauth event(s)")
+
+                if attacks:
+                    self.log_message(f"🚨 {len(attacks)} confirmed attack pattern(s):")
+                    for attack in attacks:
+                        is_yours = " [YOUR DEVICE]" if attack.target_mac in detector.protected_macs else ""
+                        self.log_message(
+                            f"   {attack.severity}: {attack.attacker_mac} -> "
+                            f"{attack.target_mac}{is_yours} "
+                            f"({attack.total_frames} frames, "
+                            f"{attack.peak_rate_per_min:.0f}/min)"
+                        )
+                else:
+                    self.log_message("   No confirmed attack patterns (below threshold)")
+
+            # Generate report
+            report_path = detector.generate_report()
+            self.log_message(f"📝 Report saved: {report_path}")
+            self.log_message("✅ Deauth detection complete")
+
+        except Exception as e:
+            self.log_message(f"❌ Error running deauth detection: {e}")
+        finally:
+            self.deauth_btn.config(state='normal', text='🛡️ Deauth\nDetection')
+
+    def rogue_ap_detection_threaded(self):
+        """Run rogue AP detection in background"""
+        self.log_message("📡 Starting rogue access point detection...")
+        self.rogue_ap_btn.config(state='disabled', text='Scanning...')
+        threading.Thread(target=self._rogue_ap_detection_background, daemon=True).start()
+
+    def _rogue_ap_detection_background(self):
+        """Background rogue AP detection"""
+        try:
+            # Load config
+            if not self.config:
+                with open('config.json', 'r') as f:
+                    self.config = json.load(f)
+
+            # Find latest Kismet database
+            db_file, error = self.check_kismet_db()
+            if error:
+                self.log_message(f"❌ Database error: {error}")
+                return
+
+            self.log_message(f"📊 Scanning database: {os.path.basename(db_file)}")
+
+            from rogue_ap_detector import RogueAPDetector
+            detector = RogueAPDetector(self.config)
+            alerts = detector.scan_kismet_db(db_file)
+            summary = detector.get_summary()
+
+            # Display results
+            self.log_message(f"📊 Scanned {summary['unique_ssids_seen']} unique SSIDs")
+            self.log_message(f"   Monitored SSIDs: {summary['monitored_ssids']}")
+            self.log_message(f"   Trusted AP profiles: {summary['trusted_aps']}")
+
+            if summary.get('learned_aps', 0) > 0:
+                self.log_message(f"   Auto-learned APs: {summary['learned_aps']}")
+
+            if not alerts:
+                self.log_message("✅ No rogue access points detected")
+                self.log_message("   Your wireless environment appears clean")
+            else:
+                self.log_message(f"🚨 {len(alerts)} rogue AP alert(s):")
+                for alert in alerts:
+                    self.log_message(
+                        f"   {alert.severity}: '{alert.ssid}' from "
+                        f"rogue BSSID {alert.rogue_bssid}"
+                    )
+                    for reason in alert.reasons[:2]:
+                        self.log_message(f"      {reason}")
+
+            # Generate report
+            report_path = detector.generate_report()
+            self.log_message(f"📝 Report saved: {report_path}")
+            self.log_message("✅ Rogue AP detection complete")
+
+        except Exception as e:
+            self.log_message(f"❌ Error running rogue AP detection: {e}")
+        finally:
+            self.rogue_ap_btn.config(state='normal', text='📡 Rogue AP\nDetection')
+
     def quit_application(self):
         """Quit application with cleanup"""
         if messagebox.askyesno("Quit", "Are you sure you want to quit CYT?"):
