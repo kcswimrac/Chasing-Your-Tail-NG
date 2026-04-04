@@ -98,13 +98,11 @@ class RogueAPDetector:
             conn = sqlite3.connect(db_path, timeout=30.0)
             conn.row_factory = sqlite3.Row
 
-            # Scan for APs in device table
-            new_alerts.extend(self._scan_ap_devices(conn))
-
-            # Check Kismet alerts for AP-related warnings
-            new_alerts.extend(self._scan_ap_alerts(conn))
-
-            conn.close()
+            try:
+                new_alerts.extend(self._scan_ap_devices(conn))
+                new_alerts.extend(self._scan_ap_alerts(conn))
+            finally:
+                conn.close()
 
         except sqlite3.Error as e:
             logger.error(f"Database error scanning for rogue APs: {e}")
@@ -142,21 +140,22 @@ class RogueAPDetector:
                 (scan_start,)
             )
 
-            for row in cursor.fetchall():
+            for row in cursor:
                 try:
                     device_data = json.loads(row['device'])
                     bssid = row['devmac'].upper()
                     last_time = float(row['last_time'])
-                    dev_type = row['type'] or ''
 
                     dot11 = device_data.get('dot11.device', {})
                     if not isinstance(dot11, dict):
                         continue
 
-                    # Extract advertised SSIDs from this device
-                    # Kismet stores these in several places
-                    advertised_ssids = self._extract_advertised_ssids(dot11)
-                    responded_ssids = self._extract_responded_ssids(dot11)
+                    advertised_ssids = self._extract_ssids_from_map(
+                        dot11, 'dot11.device.advertised_ssid_map', 'dot11.advertisedssid.ssid'
+                    )
+                    responded_ssids = self._extract_ssids_from_map(
+                        dot11, 'dot11.device.responded_ssid_map', 'dot11.respondedssid.ssid'
+                    )
                     all_ssids = advertised_ssids | responded_ssids
 
                     if not all_ssids:
@@ -211,14 +210,6 @@ class RogueAPDetector:
                                     rogue_channel=channel,
                                 )
                                 alerts.append(alert)
-
-                        # Auto-learn mode: track all APs
-                        elif self.auto_learn:
-                            if prev_bssids and bssid not in prev_bssids:
-                                # Potentially interesting - new BSSID for existing SSID
-                                # Only alert if it looks suspicious (same SSID, different BSSID)
-                                # Keep this as LOW severity for awareness
-                                pass  # Don't flood alerts for non-monitored SSIDs
 
                 except (json.JSONDecodeError, KeyError, TypeError) as e:
                     logger.debug(f"Error parsing device {row['devmac']}: {e}")
@@ -337,20 +328,22 @@ class RogueAPDetector:
             )
 
             ap_keywords = [
-                'APSPOOF', 'BSSTIMESTAMP', 'PROBECHAN',
-                'BEACONCHANGE', 'CRYPTODROP', 'ADVCRYPTCHANGE',
-                'WMMTSPEC', 'dot11_ssid_new'
+                'apspoof', 'bsstimestamp', 'probechan',
+                'beaconchange', 'cryptodrop', 'advcryptchange',
+                'wmmtspec', 'dot11_ssid_new'
             ]
 
-            for row in cursor.fetchall():
+            for row in cursor:
                 try:
                     alert_json = json.loads(row['json']) if row['json'] else {}
                     header = row['header'] if row['header'] else ''
                     alert_text = alert_json.get('kismet.alert.text', header)
                     alert_type = alert_json.get('kismet.alert.header', header)
 
+                    type_lower = alert_type.lower()
+                    text_lower = alert_text.lower()
                     is_ap_alert = any(
-                        kw.lower() in alert_type.lower() or kw.lower() in alert_text.lower()
+                        kw in type_lower or kw in text_lower
                         for kw in ap_keywords
                     )
 
@@ -380,62 +373,31 @@ class RogueAPDetector:
 
         return alerts
 
-    def _extract_advertised_ssids(self, dot11: Dict) -> Set[str]:
-        """Extract advertised SSIDs from dot11 device data"""
+    @staticmethod
+    def _extract_ssids_from_map(dot11: Dict, map_key: str, ssid_key: str) -> Set[str]:
+        """Extract SSIDs from a Kismet dot11 SSID map (advertised or responded)"""
         ssids = set()
 
-        # Kismet stores advertised SSIDs in a map
-        adv_map = dot11.get('dot11.device.advertised_ssid_map', {})
-        if isinstance(adv_map, dict):
-            for key, ssid_data in adv_map.items():
-                if isinstance(ssid_data, dict):
-                    ssid = ssid_data.get('dot11.advertisedssid.ssid', '')
-                    if ssid and isinstance(ssid, str):
-                        ssids.add(ssid)
-        elif isinstance(adv_map, list):
-            for ssid_data in adv_map:
-                if isinstance(ssid_data, dict):
-                    ssid = ssid_data.get('dot11.advertisedssid.ssid', '')
-                    if ssid and isinstance(ssid, str):
-                        ssids.add(ssid)
+        ssid_map = dot11.get(map_key, {})
+        items = ssid_map.values() if isinstance(ssid_map, dict) else ssid_map if isinstance(ssid_map, list) else []
+        for ssid_data in items:
+            if isinstance(ssid_data, dict):
+                ssid = ssid_data.get(ssid_key, '')
+                if ssid and isinstance(ssid, str):
+                    ssids.add(ssid)
 
         return ssids
 
-    def _extract_responded_ssids(self, dot11: Dict) -> Set[str]:
-        """Extract responded SSIDs from dot11 device data"""
-        ssids = set()
-
-        resp_map = dot11.get('dot11.device.responded_ssid_map', {})
-        if isinstance(resp_map, dict):
-            for key, ssid_data in resp_map.items():
-                if isinstance(ssid_data, dict):
-                    ssid = ssid_data.get('dot11.respondedssid.ssid', '')
-                    if ssid and isinstance(ssid, str):
-                        ssids.add(ssid)
-        elif isinstance(resp_map, list):
-            for ssid_data in resp_map:
-                if isinstance(ssid_data, dict):
-                    ssid = ssid_data.get('dot11.respondedssid.ssid', '')
-                    if ssid and isinstance(ssid, str):
-                        ssids.add(ssid)
-
-        return ssids
-
-    def _extract_encryption(self, dot11: Dict) -> str:
+    @staticmethod
+    def _extract_encryption(dot11: Dict) -> str:
         """Extract encryption type from dot11 device data"""
         adv_map = dot11.get('dot11.device.advertised_ssid_map', {})
-        if isinstance(adv_map, dict):
-            for key, ssid_data in adv_map.items():
-                if isinstance(ssid_data, dict):
-                    crypt = ssid_data.get('dot11.advertisedssid.crypt_string', '')
-                    if crypt:
-                        return crypt
-        elif isinstance(adv_map, list):
-            for ssid_data in adv_map:
-                if isinstance(ssid_data, dict):
-                    crypt = ssid_data.get('dot11.advertisedssid.crypt_string', '')
-                    if crypt:
-                        return crypt
+        items = adv_map.values() if isinstance(adv_map, dict) else adv_map if isinstance(adv_map, list) else []
+        for ssid_data in items:
+            if isinstance(ssid_data, dict):
+                crypt = ssid_data.get('dot11.advertisedssid.crypt_string', '')
+                if crypt:
+                    return crypt
         return ""
 
     def _extract_channel(self, device_data: Dict) -> Optional[int]:

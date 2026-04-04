@@ -11,7 +11,7 @@ import sqlite3
 import json
 import logging
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass, field
 from collections import defaultdict
@@ -100,13 +100,11 @@ class DeauthDetector:
             conn = sqlite3.connect(db_path, timeout=30.0)
             conn.row_factory = sqlite3.Row
 
-            # Method 1: Check Kismet alerts table for deauth alerts
-            new_events.extend(self._scan_alerts_table(conn))
-
-            # Method 2: Analyze device JSON for deauth indicators
-            new_events.extend(self._scan_device_deauth_data(conn))
-
-            conn.close()
+            try:
+                new_events.extend(self._scan_alerts_table(conn))
+                new_events.extend(self._scan_device_deauth_data(conn))
+            finally:
+                conn.close()
 
         except sqlite3.Error as e:
             logger.error(f"Database error scanning for deauth events: {e}")
@@ -151,22 +149,23 @@ class DeauthDetector:
                 (scan_start,)
             )
 
-            for row in cursor.fetchall():
+            deauth_keywords = [
+                'deauth', 'disassoc', 'deauthentication',
+                'disassociation', 'deauthflood', 'bssflood',
+                'apspoof', 'changehostname'
+            ]
+
+            for row in cursor:
                 try:
                     alert_json = json.loads(row['json']) if row['json'] else {}
                     header = row['header'] if row['header'] else ''
                     alert_text = alert_json.get('kismet.alert.text', header)
                     alert_type = alert_json.get('kismet.alert.header', header)
 
-                    # Filter for deauth/disassoc related alerts
-                    deauth_keywords = [
-                        'deauth', 'disassoc', 'deauthentication',
-                        'disassociation', 'DEAUTHFLOOD', 'BSSFLODD',
-                        'APSPOOF', 'CHANGEHOSTNAME'
-                    ]
-
+                    type_lower = alert_type.lower()
+                    text_lower = alert_text.lower()
                     is_deauth = any(
-                        kw.lower() in alert_type.lower() or kw.lower() in alert_text.lower()
+                        kw in type_lower or kw in text_lower
                         for kw in deauth_keywords
                     )
 
@@ -215,7 +214,7 @@ class DeauthDetector:
                 (scan_start,)
             )
 
-            for row in cursor.fetchall():
+            for row in cursor:
                 try:
                     device_data = json.loads(row['device'])
                     mac = row['devmac'].upper()
@@ -225,26 +224,17 @@ class DeauthDetector:
                     if not isinstance(dot11, dict):
                         continue
 
-                    # Check for client devices that experienced disconnections
-                    # Kismet tracks last_bssid and associated state
-                    last_bssid = dot11.get('dot11.device.last_bssid', '')
-
-                    # Check probed/responded SSID maps for disconnect indicators
-                    # A device rapidly cycling between probing and associated states
-                    # suggests it's being deauthed
                     client_map = dot11.get('dot11.device.client_map', {})
                     if isinstance(client_map, dict):
                         for bssid, client_data in client_map.items():
                             if not isinstance(client_data, dict):
                                 continue
 
-                            # High retry counts can indicate deauth interference
                             retries = client_data.get('dot11.client.retries', 0)
                             tx_packets = client_data.get('dot11.client.tx_packets', 0)
 
                             if tx_packets > 0 and retries > 0:
                                 retry_rate = retries / tx_packets
-                                # Very high retry rate suggests active interference
                                 if retry_rate > 0.5 and retries > 50:
                                     event = DeauthEvent(
                                         timestamp=last_time,
@@ -258,16 +248,6 @@ class DeauthDetector:
                                         )
                                     )
                                     events.append(event)
-
-                    # Check for type changes that indicate AP impersonation attacks
-                    # sending deauths (device flapping between AP and client type)
-                    num_associated_clients = dot11.get(
-                        'dot11.device.num_associated_clients', 0
-                    )
-                    if isinstance(num_associated_clients, int):
-                        # An AP that suddenly has 0 clients after having many
-                        # could indicate a deauth attack clearing clients
-                        pass  # Tracked across scans via attack correlation
 
                 except (json.JSONDecodeError, KeyError, TypeError) as e:
                     logger.debug(f"Error parsing device data for {row['devmac']}: {e}")
@@ -361,21 +341,21 @@ class DeauthDetector:
         return attack
 
     def _calculate_peak_rate(self, timestamps: List[float]) -> float:
-        """Calculate peak event rate per minute using sliding window"""
+        """Calculate peak event rate per minute using two-pointer sliding window (O(n))"""
         if len(timestamps) < 2:
             return float(len(timestamps))
 
         sorted_ts = sorted(timestamps)
-        max_rate = 0.0
         window = self.burst_window_seconds
+        max_count = 0
+        left = 0
 
-        for i, ts in enumerate(sorted_ts):
-            window_end = ts + window
-            count = sum(1 for t in sorted_ts[i:] if t <= window_end)
-            rate = count * (60.0 / window)  # Normalize to per-minute
-            max_rate = max(max_rate, rate)
+        for right in range(len(sorted_ts)):
+            while sorted_ts[right] - sorted_ts[left] > window:
+                left += 1
+            max_count = max(max_count, right - left + 1)
 
-        return max_rate
+        return max_count * (60.0 / window)
 
     def _classify_severity(
         self, event_count: int, peak_rate: float, target_mac: str

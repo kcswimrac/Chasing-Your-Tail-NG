@@ -733,6 +733,17 @@ class CYTGui:
         finally:
             self.surveillance_btn.config(state='normal', text='🗺️ Surveillance\nAnalysis')
             
+    def _ensure_config_and_db(self):
+        """Load config and find latest Kismet DB. Returns (config, db_path) or raises."""
+        if not self.config:
+            with open('config.json', 'r') as f:
+                self.config = json.load(f)
+        db_file, error = self.check_kismet_db()
+        if error:
+            raise RuntimeError(f"Database error: {error}")
+        self.log_message(f"📊 Scanning database: {os.path.basename(db_file)}")
+        return db_file
+
     def deauth_detection_threaded(self):
         """Run deauth detection in background"""
         self.log_message("🛡️ Starting deauthentication attack detection...")
@@ -742,18 +753,7 @@ class CYTGui:
     def _deauth_detection_background(self):
         """Background deauth detection"""
         try:
-            # Load config
-            if not self.config:
-                with open('config.json', 'r') as f:
-                    self.config = json.load(f)
-
-            # Find latest Kismet database
-            db_file, error = self.check_kismet_db()
-            if error:
-                self.log_message(f"❌ Database error: {error}")
-                return
-
-            self.log_message(f"📊 Scanning database: {os.path.basename(db_file)}")
+            db_file = self._ensure_config_and_db()
 
             from deauth_detector import DeauthDetector
             detector = DeauthDetector(self.config)
@@ -799,18 +799,7 @@ class CYTGui:
     def _rogue_ap_detection_background(self):
         """Background rogue AP detection"""
         try:
-            # Load config
-            if not self.config:
-                with open('config.json', 'r') as f:
-                    self.config = json.load(f)
-
-            # Find latest Kismet database
-            db_file, error = self.check_kismet_db()
-            if error:
-                self.log_message(f"❌ Database error: {error}")
-                return
-
-            self.log_message(f"📊 Scanning database: {os.path.basename(db_file)}")
+            db_file = self._ensure_config_and_db()
 
             from rogue_ap_detector import RogueAPDetector
             detector = RogueAPDetector(self.config)
