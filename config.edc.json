@@ -1,0 +1,128 @@
+{
+  "paths": {
+    "base_dir": "/opt/cyt",
+    "log_dir": "/var/log/cyt",
+    "kismet_logs": "/var/log/kismet/*.kismet",
+    "ignore_lists_dir": "/opt/cyt/ignore_lists",
+    "ignore_lists": {
+      "mac": "mac_list.json",
+      "ssid": "ssid_list.json"
+    },
+    "data_dir": "/var/lib/cyt",
+    "runtime_dir": "/run/cyt"
+  },
+  "timing": {
+    "check_interval": 60,
+    "list_update_interval": 5,
+    "time_windows": {
+      "recent": 5,
+      "medium": 10,
+      "old": 15,
+      "oldest": 20
+    }
+  },
+  "store": {
+    "path": "/var/lib/cyt/cyt.db",
+    "synchronous": "NORMAL",
+    "retention_days": 14,
+    "heartbeat_keep_days": 7,
+    "entity_retention_days": 30,
+    "allow_recreate_on_corrupt": false,
+    "mode": "durable",
+    "encryption": {
+      "enabled": true,
+      "sealed": true,
+      "field_encrypt": true,
+      "key_file": "/etc/cyt/store.key",
+      "salt_file": "/var/lib/cyt/store_salt.bin",
+      "runtime_dir": "/dev/shm/cyt"
+    },
+    "seal_every_cycles": 5
+  },
+  "baseline": {
+    "enabled": true,
+    "min_sightings": 5,
+    "current_place": null,
+    "places": {
+      "home": {
+        "name": "Home",
+        "lat": null,
+        "lon": null,
+        "radius_m": 150
+      },
+      "work": {
+        "name": "Work",
+        "lat": null,
+        "lon": null,
+        "radius_m": 200,
+        "hours": [[8, 19]]
+      }
+    }
+  },
+  "led": {
+    "sysfs_brightness": null,
+    "gpio": {"enabled": false, "pin": null}
+  },
+  "push": {
+    "enabled": true,
+    "backend": "ntfy",
+    "min_severity": "alert",
+    "ntfy_url": "https://ntfy.sh",
+    "ntfy_topic": "CHANGE_ME_cyt_alerts",
+    "ntfy_token": "",
+    "cooldown_seconds": 300
+  },
+  "gps_fusion": {
+    "enabled": true,
+    "min_locations_for_cotravel": 2,
+    "min_span_seconds": 900,
+    "incident_score_threshold": 0.55
+  },
+  "ie_fingerprint": { "enabled": true, "min_probe_ssids": 1 },
+  "ble_tracker": { "enabled": true, "min_score": 0.5 },
+  "rf": { "deauth_enabled": true, "rogue_enabled": true },
+  "deauth_detection": {
+    "enabled": true,
+    "burst_threshold": 10,
+    "protected_macs": []
+  },
+  "rogue_ap_detection": {
+    "enabled": true,
+    "monitored_ssids": [],
+    "trusted_aps": []
+  },
+  "incidents": {
+    "close_after_seconds": 600
+  },
+  "status": {
+    "file": "/run/cyt/status.json",
+    "stale_seconds": 150,
+    "hold_seconds": 300,
+    "deaf_seconds": 180,
+    "deaf_is_fail": true,
+    "quiet_is_watch": false,
+    "http_enabled": false,
+    "http_bind": "127.0.0.1",
+    "http_port": 8787,
+    "window_to_severity": {
+      "5-10": "watch",
+      "10-15": "watch",
+      "15-20": "alert"
+    }
+  },
+  "service": {
+    "legacy_log_file": false,
+    "legacy_log_redact": true,
+    "sd_notify": true,
+    "consecutive_fail_threshold": 5,
+    "exit_on_consecutive_fail": false,
+    "kismet_proc_check": true,
+    "watchdog_sec_hint": 180
+  },
+  "privacy": {
+    "require_fde_notice": true,
+    "sanitize_errors": true,
+    "status_path_basename_only": true,
+    "fde_ack_path": "/etc/cyt/fde_ack"
+  }
+}

@@ -13,8 +13,9 @@ logger = logging.getLogger(__name__)
 class SecureKismetDB:
     """Secure wrapper for Kismet database operations"""
     
-    def __init__(self, db_path: str):
+    def __init__(self, db_path: str, read_only: bool = False):
         self.db_path = db_path
+        self.read_only = read_only
         self._connection = None
     
     def __enter__(self):
@@ -27,9 +28,13 @@ class SecureKismetDB:
     def connect(self) -> None:
         """Establish secure database connection"""
         try:
-            self._connection = sqlite3.connect(self.db_path, timeout=30.0)
+            if self.read_only:
+                uri = f"file:{self.db_path}?mode=ro"
+                self._connection = sqlite3.connect(uri, uri=True, timeout=30.0)
+            else:
+                self._connection = sqlite3.connect(self.db_path, timeout=30.0)
             self._connection.row_factory = sqlite3.Row  # Enable column access by name
-            logger.info(f"Connected to database: {self.db_path}")
+            logger.info(f"Connected to database: {self.db_path} (ro={self.read_only})")
         except sqlite3.Error as e:
             logger.error(f"Failed to connect to database {self.db_path}: {e}")
             raise
@@ -152,6 +157,45 @@ class SecureKismetDB:
         except sqlite3.Error as e:
             logger.error(f"Database validation failed: {e}")
             return False
+
+    def capture_freshness(self, recent_window_s: float = 60.0) -> Dict[str, Any]:
+        """
+        Capture health signal for deaf-detection.
+
+        Returns:
+          {
+            "max_last_time": Optional[float],
+            "recent_device_count": int,
+            "age_s": Optional[float],
+          }
+        """
+        now = time.time()
+        try:
+            rows = self.execute_safe_query(
+                "SELECT MAX(last_time) AS max_last FROM devices"
+            )
+            max_last = rows[0]["max_last"] if rows else None
+            if max_last is not None:
+                max_last = float(max_last)
+            recent_cutoff = now - float(recent_window_s)
+            recent_rows = self.execute_safe_query(
+                "SELECT COUNT(*) AS c FROM devices WHERE last_time >= ?",
+                (recent_cutoff,),
+            )
+            recent_count = int(recent_rows[0]["c"]) if recent_rows else 0
+            age_s = (now - max_last) if max_last is not None else None
+            return {
+                "max_last_time": max_last,
+                "recent_device_count": recent_count,
+                "age_s": age_s,
+            }
+        except sqlite3.Error as e:
+            logger.error(f"capture_freshness failed: {e}")
+            return {
+                "max_last_time": None,
+                "recent_device_count": 0,
+                "age_s": None,
+            }
 
 
 class SecureTimeWindows:

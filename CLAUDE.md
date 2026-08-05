@@ -9,14 +9,21 @@ Chasing Your Tail (CYT) is a Wi-Fi probe request analyzer that monitors and trac
 ## Core Architecture
 
 ### Main Components
-- **chasing_your_tail.py**: Core monitoring engine that queries Kismet SQLite databases in real-time
-- **cyt_gui.py**: Enhanced Tkinter GUI interface for controlling the system with surveillance analysis
+- **cyt_platform/**: EDC platform P0–P3
+  - P0: WAL store, incidents, status, sd_notify, Kismet rollover
+  - P1: sealed encryption, panic wipe, baseline, LED, explainable evidence
+  - P2: debrief, ntfy push queue, GPS co-travel fusion
+  - P3: IE fingerprint re-link, BLE tracker heuristics, deauth/rogue orchestration
+- **deauth_detector.py** / **rogue_ap_detector.py**: CM5-branch RF detectors (passive)
+- **chasing_your_tail.py**: Entry wrapper → `cyt_platform` by default; `--legacy-loop` for old in-memory loop
+- **cyt_gui.py**: Optional Tkinter lab GUI (not primary EDC UX)
 - **surveillance_analyzer.py**: Main surveillance detection orchestrator with GPS correlation and advanced KML visualization
 - **surveillance_detector.py**: Core persistence detection engine for identifying suspicious device patterns
 - **gps_tracker.py**: GPS tracking integration with location clustering and spectacular Google Earth KML generation
 - **probe_analyzer.py**: Post-processing tool for analyzing collected probe data with WiGLE integration
 - **start_kismet_clean.sh**: ONLY working Kismet startup script (all others moved to old_scripts/)
 - **Security modules**: `secure_*.py` files providing SQL injection prevention and encrypted credentials
+- **docs/EDC_PLATFORM_DESIGN.md**: Approved design for world-class EDC platform + feature roadmap
 
 ### Data Flow
 1. Kismet captures wireless frames and stores in SQLite database

@@ -1,0 +1,18 @@
+[Unit]
+Description=CYT optional status helper (reads status.json / store RO)
+After=cyt-analyzer.service
+PartOf=cyt.target
+
+[Service]
+Type=oneshot
+User=cyt
+Group=cyt
+WorkingDirectory=/opt/cyt
+Environment=CYT_CONFIG=/etc/cyt/config.json
+# Placeholder: future LED/OLED driver or HTTP bridge.
+# For now, no-op success so operators can extend.
+ExecStart=/bin/true
+RemainAfterExit=yes
+
+[Install]
+WantedBy=cyt.target

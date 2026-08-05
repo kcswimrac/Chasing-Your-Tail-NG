@@ -1,0 +1,6 @@
+# Install as /etc/systemd/system/cyt-analyzer.service.d/external-kismet.conf
+# when Kismet is managed outside cyt-kismet.service.
+#
+# [Unit]
+# Wants=
+# Requires=
