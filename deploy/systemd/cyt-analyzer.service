@@ -1,0 +1,36 @@
+[Unit]
+Description=CYT headless analyzer (EDC platform)
+After=local-fs.target cyt-kismet.service
+# Soft default: external Kismet still allowed. For tight coupling use drop-in Requires=
+Wants=cyt-kismet.service
+
+[Service]
+Type=notify
+NotifyAccess=main
+User=cyt
+Group=cyt
+SupplementaryGroups=kismet
+WorkingDirectory=/opt/cyt
+Environment=CYT_CONFIG=/etc/cyt/config.json
+Environment=PYTHONUNBUFFERED=1
+# Do NOT set CYT_MASTER_PASSWORD* here — analyzer is config-only
+ExecStart=/opt/cyt/.venv/bin/python -m cyt_platform
+Restart=on-failure
+RestartSec=3
+# WatchdogSec >= 3 * timing.check_interval (default 60 → 180)
+WatchdogSec=180
+TimeoutStartSec=90
+StateDirectory=cyt
+RuntimeDirectory=cyt
+RuntimeDirectoryMode=0750
+UMask=0077
+ReadWritePaths=/var/lib/cyt /var/log/cyt /run/cyt
+ReadOnlyPaths=/var/log/kismet
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=cyt.target

@@ -1,0 +1,3 @@
+# Example: tag monitor interface for ordering (adjust ATTRS/NAME to hardware).
+# SUBSYSTEM=="net", ACTION=="add", ATTR{address}=="aa:bb:cc:dd:ee:ff", NAME="wlan1mon"
+# KERNEL=="wlan1mon", TAG+="systemd", ENV{SYSTEMD_WANTS}+="cyt-kismet.service"

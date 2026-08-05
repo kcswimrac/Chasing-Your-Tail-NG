@@ -161,15 +161,28 @@ def load_ignore_lists(config: dict) -> tuple[List[str], List[str]]:
     """
     Convenience function to load both MAC and SSID ignore lists
     Returns: (mac_list, ssid_list)
+
+    Resolves paths from:
+      paths.ignore_lists_dir (default: {base_dir}/ignore_lists)
+      paths.ignore_lists.mac / .ssid (filenames)
+    Supports absolute ignore_lists_dir. Dual format: JSON array or Python-list text.
     """
     loader = SecureIgnoreLoader()
-    
-    # Load MAC ignore list
-    mac_path = pathlib.Path('./ignore_lists') / config['paths']['ignore_lists']['mac']
-    mac_list = loader.load_mac_list(mac_path)
-    
-    # Load SSID ignore list  
-    ssid_path = pathlib.Path('./ignore_lists') / config['paths']['ignore_lists']['ssid']
-    ssid_list = loader.load_ssid_list(ssid_path)
-    
+    paths = config.get('paths') or {}
+    base = pathlib.Path(paths.get('base_dir') or '.')
+    ignore_dir = paths.get('ignore_lists_dir')
+    if ignore_dir:
+        idir = pathlib.Path(ignore_dir)
+        if not idir.is_absolute():
+            idir = base / idir
+    else:
+        idir = base / 'ignore_lists'
+
+    names = paths.get('ignore_lists') or {}
+    mac_name = names.get('mac', 'mac_list.json')
+    ssid_name = names.get('ssid', 'ssid_list.json')
+
+    mac_list = loader.load_mac_list(idir / mac_name)
+    ssid_list = loader.load_ssid_list(idir / ssid_name)
+
     return mac_list, ssid_list

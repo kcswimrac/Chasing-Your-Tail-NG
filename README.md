@@ -61,7 +61,65 @@ Edit `config.json` with your paths and settings:
 
 ## Usage
 
-### GUI Interface
+### Headless EDC analyzer (recommended)
+```bash
+# Install (venv)
+python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
+
+# Self-check (config + store + kismet glob)
+python -m cyt_platform --self-check
+
+# Run headless service (writes data/cyt.db + data/run/status.json)
+python -m cyt_platform
+
+# Legacy in-memory-only loop (no durable store)
+python -m cyt_platform --legacy-loop
+# or: python3 chasing_your_tail.py --legacy-loop
+```
+
+Status glance file: `data/run/status.json` → `state`: `clear` | `watch` | `alert` | `fail`.
+
+### P1 Trust (encryption, baseline, LED, wipe)
+```bash
+# Store encryption key
+python -m cyt_platform --init-store-key data/store.key
+# Enable store.encryption in config (see config.edc.json)
+
+# Baseline (home/work filtering)
+python -m cyt_platform baseline list
+python -m cyt_platform baseline mark --place home --key AA:BB:CC:DD:EE:FF --false
+
+# LED consumer (writes data/run/led.state)
+python -m cyt_platform --led-once
+
+# Panic wipe (destructive)
+python -m cyt_platform --panic-wipe --confirm YES
+```
+
+### P2 Payoff (debrief, push, GPS co-travel)
+```bash
+# End-of-day narrative (writes logs/debrief_YYYY-MM-DD.md)
+python -m cyt_platform --debrief
+python -m cyt_platform --debrief 2026-08-05
+
+# Push queue (ntfy) — enable push in config, then:
+python -m cyt_platform --push-flush
+# Live analyzer also enqueues on alert/fail transitions and flushes each cycle
+```
+
+### P3 RF expansion (IE fingerprint, BLE, deauth, rogue AP)
+Enabled by default in service loop when Kismet DB is present:
+- **IE fingerprinting** — re-links randomized MACs via probe SSID set + IE tags
+- **BLE tracker heuristics** — AirTag/Tile-style devices → incidents
+- **Deauth detector** — `deauth_detector.py` (CM5 branch)
+- **Rogue/evil-twin** — `rogue_ap_detector.py` (CM5 branch)
+- **GPS co-travel** — multi-cluster persistence scoring
+
+Configure `rf`, `ie_fingerprint`, `ble_tracker`, `gps_fusion`, `deauth_detection`, `rogue_ap_detection` in config.
+
+Field deploy: see `deploy/FIELD_DEPLOY.md` and `docs/EDC_PLATFORM_DESIGN.md`.
+
+### GUI Interface (lab / optional)
 ```bash
 python3 cyt_gui.py  # Enhanced GUI with surveillance analysis
 ```
@@ -72,8 +130,8 @@ python3 cyt_gui.py  # Enhanced GUI with surveillance analysis
 
 ### Command Line Monitoring
 ```bash
-# Start core monitoring (secure)
-python3 chasing_your_tail.py
+# Start headless EDC analyzer (preferred)
+python -m cyt_platform
 
 # Start Kismet (ONLY working script - July 23, 2025 fix)
 ./start_kismet_clean.sh

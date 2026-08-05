@@ -1,0 +1,7 @@
+[Unit]
+Description=CYT EDC capture + analyze stack
+Wants=cyt-kismet.service cyt-analyzer.service
+After=local-fs.target
+
+[Install]
+WantedBy=multi-user.target

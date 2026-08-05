@@ -57,11 +57,22 @@ class SecureCredentialManager:
         return Fernet(key)
     
     def _get_master_password(self) -> str:
-        """Get master password from environment variable or prompt user"""
+        """Get master password from env, password file, or prompt user"""
         # Try environment variable first (for CI/CD, etc.)
         password = os.getenv('CYT_MASTER_PASSWORD')
         if password:
             return password
+
+        # Optional password file (mode 0600 recommended): CYT_MASTER_PASSWORD_FILE
+        pw_file = os.getenv('CYT_MASTER_PASSWORD_FILE')
+        if pw_file:
+            try:
+                with open(pw_file, 'r', encoding='utf-8') as f:
+                    password = f.read().strip()
+                if password:
+                    return password
+            except OSError as e:
+                raise RuntimeError(f"Failed to read CYT_MASTER_PASSWORD_FILE: {e}") from e
         
         # Check for testing mode
         if os.getenv('CYT_TEST_MODE') == 'true':
@@ -77,7 +88,7 @@ class SecureCredentialManager:
         except (KeyboardInterrupt, EOFError):
             # Fallback for non-interactive environments
             print("⚠️  Non-interactive environment detected. Using environment variables.")
-            print("Set CYT_MASTER_PASSWORD environment variable or use CYT_TEST_MODE=true for testing")
+            print("Set CYT_MASTER_PASSWORD, CYT_MASTER_PASSWORD_FILE, or CYT_TEST_MODE=true for testing")
             raise RuntimeError("Password entry not available in non-interactive mode")
     
     def store_credential(self, service: str, credential_type: str, value: str) -> None:

@@ -2,11 +2,14 @@
   "paths": {
     "base_dir": ".",
     "log_dir": "logs",
-    "kismet_logs": "/home/matt/kismet_logs/*.kismet",
+    "kismet_logs": "/var/log/kismet/*.kismet",
+    "ignore_lists_dir": "ignore_lists",
     "ignore_lists": {
-      "mac": "mac_list.py",
-      "ssid": "ssid_list.py"
-    }
+      "mac": "mac_list.json",
+      "ssid": "ssid_list.json"
+    },
+    "data_dir": "data",
+    "runtime_dir": "data/run"
   },
   "timing": {
     "check_interval": 60,
@@ -17,6 +20,48 @@
       "old": 15,
       "oldest": 20
     }
+  },
+  "store": {
+    "path": "data/cyt.db",
+    "synchronous": "NORMAL",
+    "retention_days": 14,
+    "heartbeat_keep_days": 7,
+    "entity_retention_days": 30,
+    "allow_recreate_on_corrupt": false,
+    "mode": "durable"
+  },
+  "incidents": {
+    "close_after_seconds": 600
+  },
+  "status": {
+    "file": "data/run/status.json",
+    "stale_seconds": 150,
+    "hold_seconds": 300,
+    "deaf_seconds": 180,
+    "deaf_is_fail": true,
+    "quiet_is_watch": false,
+    "http_enabled": false,
+    "http_bind": "127.0.0.1",
+    "http_port": 8787,
+    "window_to_severity": {
+      "5-10": "watch",
+      "10-15": "watch",
+      "15-20": "alert"
+    }
+  },
+  "service": {
+    "legacy_log_file": false,
+    "legacy_log_redact": true,
+    "sd_notify": true,
+    "consecutive_fail_threshold": 5,
+    "exit_on_consecutive_fail": false,
+    "kismet_proc_check": true,
+    "watchdog_sec_hint": 180
+  },
+  "privacy": {
+    "require_fde_notice": true,
+    "sanitize_errors": true,
+    "status_path_basename_only": true
   },
   "search": {
     "lat_min": 31.3,

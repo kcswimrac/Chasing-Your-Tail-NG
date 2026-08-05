@@ -1,0 +1,21 @@
+[Unit]
+Description=Kismet wireless capture for CYT
+After=local-fs.target network-pre.target
+Wants=network-pre.target
+
+[Service]
+Type=simple
+# Prefer distro package path; override with drop-in for /usr/local/bin builds
+User=root
+EnvironmentFile=-/etc/cyt/kismet.env
+# KISMET_SOURCE defaults to wlan1 — set in /etc/cyt/kismet.env
+ExecStart=/usr/bin/kismet --no-ncurses -c ${KISMET_SOURCE:-wlan1}
+Restart=on-failure
+RestartSec=2
+# Capture needs net admin; many Pi images run kismet as root
+# Alternative forking unit for local --daemonize builds:
+# Type=forking
+# ExecStart=/usr/local/bin/kismet -c wlan1 --daemonize
+
+[Install]
+WantedBy=cyt.target

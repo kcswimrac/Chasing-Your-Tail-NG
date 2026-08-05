@@ -1,0 +1,28 @@
+# EDC platform local state
+data/
+!data/.gitkeep
+data/run/
+*.db
+*.db-wal
+*.db-shm
+*.db.sealed
+*.sealed
+*.key
+store_salt.bin
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+.venv/
+dist/
+build/
+
+# Runtime artifacts
+logs/debrief_*.md
+logs/analyzer.log*
+logs/cyt_log_*
+cyt_security.log
+data/run/
+**/led.state
+**/led.json
+**/status.json

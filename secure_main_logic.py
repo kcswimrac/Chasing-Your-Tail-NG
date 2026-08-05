@@ -2,20 +2,43 @@
 Secure main logic for Chasing Your Tail - replaces vulnerable SQL operations
 """
 import logging
-from typing import List, Dict, Set
+import time
+from dataclasses import dataclass
+from typing import Callable, List, Dict, Optional, Set
 from secure_database import SecureKismetDB, SecureTimeWindows
 
 logger = logging.getLogger(__name__)
 
+
+@dataclass(frozen=True)
+class MatchEvent:
+    """Structured match for on_match hooks (EDC platform)."""
+    kind: str                 # "mac_reappear" | "ssid_probe_repeat"
+    subject: str              # MAC uppercased or SSID as-is
+    window: str               # "5-10" | "10-15" | "15-20"
+    observed_at: float
+    source_mac: Optional[str] = None
+    kismet_db: str = ""
+
+
 class SecureCYTMonitor:
     """Secure monitoring logic for CYT"""
     
-    def __init__(self, config: dict, ignore_list: List[str], ssid_ignore_list: List[str], log_file):
+    def __init__(
+        self,
+        config: dict,
+        ignore_list: List[str],
+        ssid_ignore_list: List[str],
+        log_file,
+        on_match: Optional[Callable[[MatchEvent], None]] = None,
+    ):
         self.config = config
         self.ignore_list = set(mac.upper() for mac in ignore_list)  # Convert to set for O(1) lookup
         self.ssid_ignore_list = set(ssid_ignore_list)
         self.log_file = log_file
         self.time_manager = SecureTimeWindows(config)
+        self.on_match = on_match
+        self.current_kismet_db: str = ""
         
         # Initialize tracking lists
         self.past_five_mins_macs: Set[str] = set()
@@ -27,6 +50,29 @@ class SecureCYTMonitor:
         self.five_ten_min_ago_ssids: Set[str] = set()
         self.ten_fifteen_min_ago_ssids: Set[str] = set()
         self.fifteen_twenty_min_ago_ssids: Set[str] = set()
+
+    def _emit(
+        self,
+        kind: str,
+        subject: str,
+        window: str,
+        source_mac: Optional[str] = None,
+    ) -> None:
+        if not self.on_match:
+            return
+        try:
+            self.on_match(
+                MatchEvent(
+                    kind=kind,
+                    subject=subject,
+                    window=window,
+                    observed_at=time.time(),
+                    source_mac=source_mac,
+                    kismet_db=self.current_kismet_db,
+                )
+            )
+        except Exception as e:
+            logger.error(f"on_match handler failed: {e}")
     
     def initialize_tracking_lists(self, db: SecureKismetDB) -> None:
         """Initialize all tracking lists securely"""
@@ -163,54 +209,62 @@ class SecureCYTMonitor:
             logger.info(f"Probe detected from {mac}: {ssid}")
             
             # Check against historical lists
-            self._check_ssid_history(ssid)
+            self._check_ssid_history(ssid, source_mac=mac)
             
         except (KeyError, TypeError, AttributeError) as e:
             logger.debug(f"No probe data for device {mac}: {e}")
     
-    def _check_ssid_history(self, ssid: str) -> None:
+    def _check_ssid_history(self, ssid: str, source_mac: str = "") -> None:
         """Check SSID against historical tracking lists"""
+        src = source_mac.upper() if source_mac else None
         if ssid in self.five_ten_min_ago_ssids:
             message = f"Probe for {ssid} in 5 to 10 mins list"
             print(message)
             self.log_file.write(f"{message}\n")
             logger.warning(f"Repeated probe detected: {ssid} (5-10 min window)")
+            self._emit("ssid_probe_repeat", ssid, "5-10", source_mac=src)
         
         if ssid in self.ten_fifteen_min_ago_ssids:
             message = f"Probe for {ssid} in 10 to 15 mins list"
             print(message)
             self.log_file.write(f"{message}\n")
             logger.warning(f"Repeated probe detected: {ssid} (10-15 min window)")
+            self._emit("ssid_probe_repeat", ssid, "10-15", source_mac=src)
         
         if ssid in self.fifteen_twenty_min_ago_ssids:
             message = f"Probe for {ssid} in 15 to 20 mins list"
             print(message)
             self.log_file.write(f"{message}\n")
             logger.warning(f"Repeated probe detected: {ssid} (15-20 min window)")
+            self._emit("ssid_probe_repeat", ssid, "15-20", source_mac=src)
     
     def _process_mac_tracking(self, mac: str) -> None:
         """Process MAC address tracking"""
-        if mac.upper() in self.ignore_list:
+        mac_u = mac.upper()
+        if mac_u in self.ignore_list:
             return
         
-        # Check against historical lists
-        if mac in self.five_ten_min_ago_macs:
-            message = f"{mac} in 5 to 10 mins list"
+        # Case-normalized membership (sets store uppercased MACs)
+        if mac_u in self.five_ten_min_ago_macs:
+            message = f"{mac_u} in 5 to 10 mins list"
             print(message)
             self.log_file.write(f"{message}\n")
-            logger.warning(f"Device reappeared: {mac} (5-10 min window)")
+            logger.warning(f"Device reappeared: {mac_u} (5-10 min window)")
+            self._emit("mac_reappear", mac_u, "5-10")
         
-        if mac in self.ten_fifteen_min_ago_macs:
-            message = f"{mac} in 10 to 15 mins list"
+        if mac_u in self.ten_fifteen_min_ago_macs:
+            message = f"{mac_u} in 10 to 15 mins list"
             print(message)
             self.log_file.write(f"{message}\n")
-            logger.warning(f"Device reappeared: {mac} (10-15 min window)")
+            logger.warning(f"Device reappeared: {mac_u} (10-15 min window)")
+            self._emit("mac_reappear", mac_u, "10-15")
         
-        if mac in self.fifteen_twenty_min_ago_macs:
-            message = f"{mac} in 15 to 20 mins list"
+        if mac_u in self.fifteen_twenty_min_ago_macs:
+            message = f"{mac_u} in 15 to 20 mins list"
             print(message)
             self.log_file.write(f"{message}\n")
-            logger.warning(f"Device reappeared: {mac} (15-20 min window)")
+            logger.warning(f"Device reappeared: {mac_u} (15-20 min window)")
+            self._emit("mac_reappear", mac_u, "15-20")
     
     def rotate_tracking_lists(self, db: SecureKismetDB) -> None:
         """Rotate tracking lists and update with fresh data"""
