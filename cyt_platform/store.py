@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import sqlite3
 import time
@@ -129,6 +130,49 @@ CREATE TABLE IF NOT EXISTS baseline_sightings (
 -- suppressed=1 means open but excluded from threat counts
 ALTER TABLE incidents ADD COLUMN suppressed INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE incidents ADD COLUMN evidence_json TEXT;
+"""
+
+# Schema v4 (D1): canonical provenance-bearing observation store.
+#
+# Observations are the evidence substrate every later layer (replay,
+# identity, fusion, incidents) reads from. They capture WHAT was seen
+# (kind + identity_key), WHEN (ts is the source-corrected timestamp,
+# recorded_ts the wall clock at insert), WHERE (optional lat/lon), and
+# the PROVENANCE needed to reproduce a conclusion from recorded data
+# (source, source_ref, cycle_id, detector, input_digest).
+#
+# Append-only: UPDATE is rejected at the database level by trigger —
+# correct an observation by recording a new one. identity_key is stored
+# unencrypted so provenance queries stay deterministic; at-rest lifecycle
+# for these rows is owned by retention (D8), not by this schema.
+SCHEMA_V4 = """
+CREATE TABLE IF NOT EXISTS observations (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts            REAL NOT NULL,
+  recorded_ts   REAL NOT NULL,
+  source        TEXT NOT NULL CHECK (length(source) > 0),
+  kind          TEXT NOT NULL CHECK (length(kind) > 0),
+  identity_key  TEXT NOT NULL CHECK (length(identity_key) > 0),
+  detector      TEXT,
+  lat           REAL,
+  lon           REAL,
+  accuracy_m    REAL,
+  payload_json  TEXT,
+  cycle_id      INTEGER NOT NULL,
+  source_ref    TEXT NOT NULL CHECK (length(source_ref) > 0),
+  input_digest  TEXT NOT NULL CHECK (length(input_digest) > 0),
+  session_id    TEXT,
+  CHECK (source != 'detector' OR (detector IS NOT NULL AND length(detector) > 0))
+);
+CREATE INDEX IF NOT EXISTS idx_obs_identity_ts ON observations(identity_key, ts);
+CREATE INDEX IF NOT EXISTS idx_obs_source_ts ON observations(source, ts);
+CREATE INDEX IF NOT EXISTS idx_obs_cycle ON observations(cycle_id);
+
+CREATE TRIGGER IF NOT EXISTS trg_observations_no_update
+BEFORE UPDATE ON observations
+BEGIN
+  SELECT RAISE(ABORT, 'observations is append-only: record a new observation instead');
+END;
 """
 
 
@@ -299,6 +343,13 @@ class CytStore:
                 "INSERT OR REPLACE INTO schema_meta(key, value) VALUES (?, ?)",
                 ("version", "3"),
             )
+            version = 3
+        if version < 4:
+            self._migrate_v4(c)
+            c.execute(
+                "INSERT OR REPLACE INTO schema_meta(key, value) VALUES (?, ?)",
+                ("version", "4"),
+            )
 
     def _migrate_v2(self, c: sqlite3.Cursor) -> None:
         c.execute(
@@ -408,6 +459,10 @@ class CytStore:
             );
             """
         )
+
+    def _migrate_v4(self, c: sqlite3.Cursor) -> None:
+        """Canonical observation store: additive, no existing table is altered."""
+        c.executescript(SCHEMA_V4)
 
     def checkpoint(self) -> None:
         try:
@@ -1166,4 +1221,156 @@ class CytStore:
             (fingerprint_id,),
         ).fetchall()
         return [int(r["entity_id"]) for r in rows]
+
+    # --- observations (schema v4, D1) ---
+    @staticmethod
+    def _observation_row_to_dict(row: sqlite3.Row) -> dict:
+        out = dict(row)
+        payload_json = out.pop("payload_json", None)
+        if payload_json:
+            try:
+                out["payload"] = json.loads(payload_json)
+            except json.JSONDecodeError:
+                out["payload"] = None
+        else:
+            out["payload"] = None
+        return out
+
+    def record_observation(
+        self,
+        *,
+        ts: float,
+        source: str,
+        kind: str,
+        identity_key: str,
+        cycle_id: int,
+        source_ref: str,
+        input_digest: str,
+        detector: Optional[str] = None,
+        lat: Optional[float] = None,
+        lon: Optional[float] = None,
+        accuracy_m: Optional[float] = None,
+        payload: Optional[dict] = None,
+        session_id: Optional[str] = None,
+        recorded_ts: Optional[float] = None,
+    ) -> int:
+        """Persist one canonical observation; return its row id.
+
+        Provenance fields (source, source_ref, cycle_id, input_digest) are
+        mandatory — an observation without provenance cannot exist. There
+        is deliberately no update path: correct an observation by recording
+        a new one.
+        """
+        missing = [
+            name
+            for name, value in (
+                ("ts", ts),
+                ("source", source),
+                ("kind", kind),
+                ("identity_key", identity_key),
+                ("cycle_id", cycle_id),
+                ("source_ref", source_ref),
+                ("input_digest", input_digest),
+            )
+            if value is None or (isinstance(value, str) and not value.strip())
+        ]
+        if missing:
+            raise ValueError(
+                "observation missing provenance fields: " + ", ".join(missing)
+            )
+        if source == "detector" and not (detector and detector.strip()):
+            raise ValueError(
+                "observation with source='detector' requires a detector identity"
+            )
+        if payload is not None and not isinstance(payload, dict):
+            raise ValueError("observation payload must be a dict or None")
+
+        ts_f = float(ts)
+        if not math.isfinite(ts_f):
+            raise ValueError("observation ts must be a finite epoch value")
+        cycle = int(cycle_id)
+        recorded = float(recorded_ts) if recorded_ts is not None else time.time()
+
+        cur = self.conn.execute(
+            """
+            INSERT INTO observations(
+              ts, recorded_ts, source, kind, identity_key, detector,
+              lat, lon, accuracy_m, payload_json, cycle_id,
+              source_ref, input_digest, session_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                ts_f,
+                recorded,
+                str(source),
+                str(kind),
+                str(identity_key),
+                detector,
+                lat,
+                lon,
+                accuracy_m,
+                json.dumps(payload) if payload else None,
+                cycle,
+                str(source_ref),
+                str(input_digest),
+                session_id,
+            ),
+        )
+        return int(cur.lastrowid)
+
+    def get_observation(self, obs_id: int) -> Optional[dict]:
+        row = self.conn.execute(
+            "SELECT * FROM observations WHERE id = ?", (int(obs_id),)
+        ).fetchone()
+        if row is None:
+            return None
+        return self._observation_row_to_dict(row)
+
+    def query_observations(
+        self,
+        *,
+        identity_key: Optional[str] = None,
+        source: Optional[str] = None,
+        kind: Optional[str] = None,
+        detector: Optional[str] = None,
+        cycle_id: Optional[int] = None,
+        since: Optional[float] = None,
+        until: Optional[float] = None,
+        limit: int = 500,
+    ) -> List[dict]:
+        """Query observations by device, time range, source, or cycle.
+
+        All filters are parameterized; results order by (ts, id) so a
+        given query is deterministic. Returns dicts with payload parsed.
+        """
+        clauses: List[str] = []
+        params: List[object] = []
+        if identity_key is not None:
+            clauses.append("identity_key = ?")
+            params.append(identity_key)
+        if source is not None:
+            clauses.append("source = ?")
+            params.append(source)
+        if kind is not None:
+            clauses.append("kind = ?")
+            params.append(kind)
+        if detector is not None:
+            clauses.append("detector = ?")
+            params.append(detector)
+        if cycle_id is not None:
+            clauses.append("cycle_id = ?")
+            params.append(int(cycle_id))
+        if since is not None:
+            clauses.append("ts >= ?")
+            params.append(float(since))
+        if until is not None:
+            clauses.append("ts <= ?")
+            params.append(float(until))
+        sql = "SELECT * FROM observations"
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+        sql += " ORDER BY ts ASC, id ASC LIMIT ?"
+        params.append(max(1, min(int(limit), 5000)))
+        rows = self.conn.execute(sql, tuple(params)).fetchall()
+        return [self._observation_row_to_dict(r) for r in rows]
 
