@@ -202,8 +202,14 @@ def run(
                                 kdb, db_path, recent_window_s=max(check_interval, 120)
                             )
                     except Exception as rfe:
+                        # Total RF-plugin failure must be visible in status:
+                        # never read clear while detectors are failing.
                         log.warning("RF plugins: %s", sanitize_error(rfe))
-                        rf_stats = {}
+                        rf_stats = {
+                            "detector_failures": {
+                                "rf_runner": sanitize_error(rfe)
+                            }
+                        }
 
                 now = time.time()
                 # Place: config override, else GPS cluster as soft place id
@@ -246,6 +252,7 @@ def run(
                     analyzer_ok=True,
                     kismet_db_ok=True,
                     kismet_proc_ok=proc_ok,
+                    detector_failures=rf_stats.get("detector_failures"),
                 )
                 # P2 push on escalation transitions
                 try:
