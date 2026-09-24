@@ -7,7 +7,8 @@ from pathlib import Path
 
 from cyt_platform.ble_tracker import BLETrackerEngine, tracker_score
 from cyt_platform.debrief import generate_debrief
-from cyt_platform.gps_live import LiveGpsFusion, cluster_id, extract_gps_from_device_json
+from cyt_platform.gps_live import LiveGpsFusion, extract_gps_from_device_json
+from cyt_platform.location import stable_cluster_id as cluster_id
 from cyt_platform.ie_fingerprint import IEFingerprintEngine, extract_ie_fingerprint
 from cyt_platform.push import PushQueue
 from cyt_platform.store import CytStore

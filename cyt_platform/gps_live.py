@@ -1,13 +1,27 @@
-"""P2: Live GPS extraction from Kismet + co-travel scoring."""
+"""D5: Live GPS extraction from Kismet + co-travel scoring on operator path.
+
+Location geometry lives in cyt_platform/location.py (pure, replayable);
+this module is the live adapter: it extracts GPS fixes from Kismet device
+JSON, clusters them into haversine-radius places (replacing 0.001° grid
+cells, whose boundary pairs 10 m apart over-counted locations), records
+observations through the CytStore API, and scores co-travel against the
+operator's own visited places — the audit's docstring-lie fix.
+"""
 
 from __future__ import annotations
 
 import json
 import logging
-import math
 import time
 from dataclasses import dataclass
 from typing import Any, List, Optional, Tuple
+
+from cyt_platform.location import (
+    DEFAULT_MERGE_RADIUS_M,
+    DEFAULT_REVISIT_GAP_S,
+    haversine_m,
+    stable_cluster_id,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -21,18 +35,19 @@ class GpsFix:
     source: str = "kismet"
 
 
-def haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    r = 6371000.0
-    p1, p2 = math.radians(lat1), math.radians(lat2)
-    dphi = math.radians(lat2 - lat1)
-    dl = math.radians(lon2 - lon1)
-    a = math.sin(dphi / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
-    return 2 * r * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+@dataclass
+class _ClusterAnchor:
+    """Registered place: sightings within merge radius reuse its stable id."""
+
+    lat: float
+    lon: float
+    cluster_id: str
+    last_seen: float
 
 
-def cluster_id(lat: float, lon: float, precision: int = 3) -> str:
-    """~100m-ish grid cell id at precision=3."""
-    return f"g_{lat:.{precision}f}_{lon:.{precision}f}"
+# Anchor registry is bounded session state; the geometric truth of a place
+# is always recomputable from the persisted lat/lon observations.
+ANCHOR_REGISTRY_CAP = 512
 
 
 def extract_gps_from_device_json(device_data: dict) -> Optional[Tuple[float, float, float]]:
@@ -86,22 +101,115 @@ def extract_gps_from_device_json(device_data: dict) -> Optional[Tuple[float, flo
 
 
 class LiveGpsFusion:
-    """Track operator path from Kismet GPS + score co-traveling devices."""
+    """Track operator path from Kismet GPS + score co-traveling devices.
+
+    Operator fixes are recorded as canonical ``gps``/``gps_fix``
+    observations (D1) with cycle provenance; device sightings reuse the
+    existing ``record_location_sighting`` API keyed by haversine place ids
+    instead of grid cells.
+    """
 
     def __init__(self, store: Any, config: dict):
         self.store = store
         self.cfg = config.get("gps_fusion") or {}
         self.enabled = bool(self.cfg.get("enabled", True))
-        self.cluster_m = float(self.cfg.get("cluster_meters") or 100)
+        # merge_radius_m wins; cluster_meters (legacy grid-size knob) is the
+        # fallback so existing tuned configs keep their radius.
+        self.merge_radius_m = float(
+            self.cfg.get("merge_radius_m")
+            or self.cfg.get("cluster_meters")
+            or DEFAULT_MERGE_RADIUS_M
+        )
         self.min_locations = int(self.cfg.get("min_locations_for_cotravel") or 2)
         self.min_span_s = float(self.cfg.get("min_span_seconds") or 900)
+        self.revisit_gap_s = float(
+            self.cfg.get("revisit_gap_s") or DEFAULT_REVISIT_GAP_S
+        )
         self.last_fix: Optional[GpsFix] = None
-        self.operator_clusters: List[str] = []
+        self.operator_path: List[_ClusterAnchor] = []
+        self.anchors: List[_ClusterAnchor] = []
+        self._cycle_counter = 0
+
+    def _place_id(self, lat: float, lon: float, now: float) -> _ClusterAnchor:
+        """Return the anchor for this point, creating one when it is a new place.
+
+        Haversine radius, not grid cells: two fixes 10 m apart share a place
+        even across a 0.001° boundary, while places km apart stay distinct.
+        """
+        for anchor in self.anchors:
+            if haversine_m(anchor.lat, anchor.lon, lat, lon) <= self.merge_radius_m:
+                anchor.last_seen = now
+                return anchor
+        anchor = _ClusterAnchor(
+            lat=lat,
+            lon=lon,
+            cluster_id=stable_cluster_id(lat, lon),
+            last_seen=now,
+        )
+        self.anchors.append(anchor)
+        if len(self.anchors) > ANCHOR_REGISTRY_CAP:
+            # Drop the stalest anchor — bounded registry, geometrically recoverable.
+            self.anchors.sort(key=lambda a: a.last_seen)
+            self.anchors.pop(0)
+        return anchor
+
+    def _record_observation(
+        self,
+        *,
+        source: str,
+        kind: str,
+        identity_key: str,
+        ts: float,
+        lat: float,
+        lon: float,
+        payload: dict,
+    ) -> None:
+        """Persist one located observation through the CytStore API (D1)."""
+        from cyt_platform import observations as obs  # lazy: obs imports this module
+
+        session_id = self.store.get_runtime("session_id")
+        if source == obs.SOURCE_GPS:
+            rec = obs.normalize_gps_fix(
+                lat=lat,
+                lon=lon,
+                ts=ts,
+                cycle_id=self._cycle_counter,
+                session_id=session_id,
+            )
+        else:
+            rec = {
+                "ts": float(ts),
+                "source": source,
+                "kind": kind,
+                "identity_key": identity_key,
+                "cycle_id": self._cycle_counter,
+                "source_ref": f"kismet:live:devices:mac={identity_key}:ts={ts}",
+                "input_digest": obs.input_digest(
+                    {"k": identity_key, "ts": ts, "lat": lat, "lon": lon}
+                ),
+                "payload": payload,
+                "session_id": session_id,
+                "lat": lat,
+                "lon": lon,
+            }
+        if rec is None:
+            return
+        # Errors propagate: rf_plugins records them as a gps component
+        # failure — a silent drop here would be an invisible blind spot.
+        self.store.record_observation(**rec)
 
     def ingest_kismet(self, kdb: Any, recent_window_s: float = 120.0) -> Optional[GpsFix]:
+        """Pull located devices + the operator fix for this cycle.
+
+        Records one ``gps_fix`` observation for the operator fix and one
+        ``wifi_device`` observation per located device. Device location
+        sightings are keyed by haversine place id. Returns the operator
+        fix, or None when no located fix exists this cycle.
+        """
         if not self.enabled:
             return None
         now = time.time()
+        self._cycle_counter += 1
         try:
             devices = kdb.get_devices_by_time_range(now - recent_window_s)
         except Exception as e:
@@ -109,6 +217,7 @@ class LiveGpsFusion:
             return None
 
         best: Optional[GpsFix] = None
+        located: List[Tuple[str, float, float, float]] = []
         for d in devices:
             dd = d.get("device_data") or {}
             extracted = extract_gps_from_device_json(dd)
@@ -118,21 +227,49 @@ class LiveGpsFusion:
             fix = GpsFix(lat=lat, lon=lon, ts=ts, source="kismet_device")
             if best is None or ts > best.ts:
                 best = fix
-            # record device at cluster
+            # record device at its haversine place
             mac = (d.get("mac") or "").upper()
             if mac:
-                loc_id = cluster_id(lat, lon)
-                self.store.record_location_sighting(
-                    "wifi_mac", mac, loc_id, lat, lon, ts or now
+                located.append((mac, lat, lon, ts))
+                self._record_observation(
+                    source="kismet.devices",
+                    kind="wifi_device",
+                    identity_key=mac,
+                    ts=ts,
+                    lat=lat,
+                    lon=lon,
+                    payload={},
                 )
 
-        if best:
-            self.last_fix = best
-            loc_id = cluster_id(best.lat, best.lon)
-            if not self.operator_clusters or self.operator_clusters[-1] != loc_id:
-                self.operator_clusters.append(loc_id)
-            self.store.set_runtime("last_gps", json.dumps({"lat": best.lat, "lon": best.lon, "ts": best.ts}))
-            self.store.set_runtime("last_gps_cluster", loc_id)
+        if best is None:
+            return None
+
+        self.last_fix = best
+        operator_anchor = self._place_id(best.lat, best.lon, best.ts)
+        if (
+            not self.operator_path
+            or self.operator_path[-1].cluster_id != operator_anchor.cluster_id
+        ):
+            self.operator_path.append(operator_anchor)
+        self._record_observation(
+            source="gps",
+            kind="gps_fix",
+            identity_key="operator",
+            ts=best.ts,
+            lat=best.lat,
+            lon=best.lon,
+            payload={"device_source": best.source},
+        )
+        for mac, lat, lon, ts in located:
+            place = self._place_id(lat, lon, ts)
+            self.store.record_location_sighting(
+                "wifi_mac", mac, place.cluster_id, lat, lon, ts
+            )
+        self.store.set_runtime(
+            "last_gps",
+            json.dumps({"lat": best.lat, "lon": best.lon, "ts": best.ts}),
+        )
+        self.store.set_runtime("last_gps_cluster", operator_anchor.cluster_id)
         return best
 
     def score_cotravel(self, now: Optional[float] = None) -> List[dict]:
