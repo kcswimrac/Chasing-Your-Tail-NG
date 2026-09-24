@@ -30,7 +30,7 @@ def test_migrate_version(store: CytStore):
     row = store.conn.execute(
         "SELECT value FROM schema_meta WHERE key='version'"
     ).fetchone()
-    assert row["value"] == "3"  # schema v3: push, gps, fingerprints
+    assert row["value"] == "4"  # schema v4: canonical observation store
 
 
 def test_dedup_ten_observes_one_incident(store: CytStore):
