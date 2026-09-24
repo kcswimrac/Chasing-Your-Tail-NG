@@ -74,8 +74,14 @@ class SecureCredentialManager:
             except OSError as e:
                 raise RuntimeError(f"Failed to read CYT_MASTER_PASSWORD_FILE: {e}") from e
         
-        # Check for testing mode
+        # Check for testing mode (explicit env opt-in only — nothing in the
+        # codebase may set this on the operator's behalf)
         if os.getenv('CYT_TEST_MODE') == 'true':
+            print("⚠️  WARNING: CYT_TEST_MODE is enabled — using the PUBLIC "
+                  "committed 'test_password_123'.")
+            print("⚠️  Anyone who has read this repository can decrypt your "
+                  "credential store. Never use test mode outside throwaway demos.")
+            logger.warning("CYT_TEST_MODE enabled: using the committed public test password")
             return 'test_password_123'
         
         # Prompt user (for interactive use)

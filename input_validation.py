@@ -2,6 +2,8 @@
 Input validation and sanitization for CYT
 Prevents injection attacks and ensures data integrity
 """
+from html import escape as _html_escape
+from xml.sax.saxutils import escape as _xml_escape
 import re
 import json
 import logging
@@ -109,6 +111,41 @@ class InputValidator:
                 sanitized = sanitized.replace(keyword.lower(), '')
         
         return sanitized.strip()
+
+    @classmethod
+    def escape_xml_text(cls, value: str) -> str:
+        """Escape RF-sourced text for interpolation into an XML text node.
+
+        Use for KML <name> and similar raw-XML contexts. Escapes &, <, >
+        so hostile SSIDs/MACs cannot inject XML elements.
+        """
+        return _xml_escape(str(value))
+
+    @classmethod
+    def escape_cdata_html(cls, value: str) -> str:
+        """Escape RF-sourced text for interpolation inside a KML CDATA (HTML) block.
+
+        Escapes the HTML specials; because '>' never survives literally, a
+        hostile value cannot close the CDATA section early with ']]>' and
+        break out into the surrounding XML.
+        """
+        return _html_escape(str(value), quote=True)
+
+    @classmethod
+    def escape_markdown_text(cls, value: str) -> str:
+        """Escape RF-sourced text for interpolation into a markdown report.
+
+        The markdown is later converted to HTML by pandoc, which passes raw
+        HTML through and honors link syntax; backslash-escaping the markdown
+        and HTML metacharacters keeps hostile SSIDs/MACs rendering as inert
+        literal text in both the .md and the generated .html.
+        """
+        text = str(value)
+        # Backslash first so later replacements are not double-escaped.
+        text = text.replace('\\', '\\\\')
+        for char in ('`', '[', ']', '<', '>', '&'):
+            text = text.replace(char, '\\' + char)
+        return text
     
     @classmethod
     def validate_config_structure(cls, config: Dict[str, Any]) -> bool:

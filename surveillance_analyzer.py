@@ -32,8 +32,10 @@ class SurveillanceAnalyzer:
     """Main surveillance analysis orchestrator"""
     
     def __init__(self, config_path: str = 'config.json'):
-        # Load secure configuration
-        os.environ['CYT_TEST_MODE'] = 'true'  # For non-interactive mode
+        # Load secure configuration. Test mode is never enabled here: a config
+        # without credentials needs no master password, and one with them
+        # requires an explicit operator opt-in (CYT_MASTER_PASSWORD, or
+        # CYT_TEST_MODE for throwaway demo environments only).
         self.config, self.credential_manager = secure_config_loader(config_path)
         
         # Initialize components

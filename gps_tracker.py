@@ -10,6 +10,16 @@ from typing import Dict, List, Tuple, Optional, NamedTuple
 from dataclasses import dataclass
 import math
 
+from input_validation import InputValidator
+
+def _xml_safe(value: str) -> str:
+    """Escape RF-sourced text for KML XML text nodes (<name>, etc.)."""
+    return InputValidator.escape_xml_text(value)
+
+def _cdata_safe(value: str) -> str:
+    """Escape RF-sourced text for KML CDATA (HTML) description blocks."""
+    return InputValidator.escape_cdata_html(value)
+
 logger = logging.getLogger(__name__)
 
 @dataclass
@@ -401,12 +411,12 @@ class KMLExporter:
             
             placemark = f'''
     <Placemark>
-        <name>[{location_color}] {session.session_id}</name>
+        <name>[{location_color}] {_xml_safe(session.session_id)}</name>
         <description>
             <![CDATA[
             <h3>{threat_indicator}</h3>
             <table border="1" cellpadding="5">
-            <tr><td><b>Location ID</b></td><td>{session.session_id}</td></tr>
+            <tr><td><b>Location ID</b></td><td>{_cdata_safe(session.session_id)}</td></tr>
             <tr><td><b>Persistence Score</b></td><td>{location_persistence_score:.3f}/1.000</td></tr>
             <tr><td><b>Monitoring Start</b></td><td>{start_time.strftime('%Y-%m-%d %H:%M:%S')}</td></tr>
             <tr><td><b>Monitoring End</b></td><td>{end_time.strftime('%Y-%m-%d %H:%M:%S')}</td></tr>
@@ -505,7 +515,7 @@ class KMLExporter:
         
         # Limit to first 10 devices to avoid clutter
         displayed_devices = devices[:10]
-        formatted = "<br/>".join(f"• {mac}" for mac in displayed_devices)
+        formatted = "<br/>".join(f"• {_cdata_safe(mac)}" for mac in displayed_devices)
         
         if len(devices) > 10:
             formatted += f"<br/>... and {len(devices) - 10} more"
@@ -517,7 +527,7 @@ class KMLExporter:
         if not reasons:
             return "No specific threats identified"
         
-        return "<br/>".join(f"• {reason}" for reason in reasons)
+        return "<br/>".join(f"• {_cdata_safe(reason)}" for reason in reasons)
     
     def _format_enhanced_device_list(self, all_devices: List[str], suspicious_devices: List) -> str:
         """Format enhanced device list with threat intelligence"""
@@ -530,12 +540,12 @@ class KMLExporter:
         # Show suspicious devices first
         for device in suspicious_devices:
             persistence_emoji = "🚨" if device.persistence_score > 0.8 else "⚠️" if device.persistence_score > 0.6 else "🟡"
-            html += f"<li><b>{persistence_emoji} {device.mac}</b> - Persistence Score: {device.persistence_score:.2f}</li>"
+            html += f"<li><b>{persistence_emoji} {_cdata_safe(device.mac)}</b> - Persistence Score: {device.persistence_score:.2f}</li>"
         
         # Show remaining devices
         normal_devices = [mac for mac in all_devices if mac not in suspicious_macs]
         for mac in normal_devices[:10]:  # Limit to avoid clutter
-            html += f"<li>✅ {mac} - Normal</li>"
+            html += f"<li>✅ {_cdata_safe(mac)} - Normal</li>"
         
         if len(normal_devices) > 10:
             html += f"<li><i>... and {len(normal_devices) - 10} more normal devices</i></li>"
@@ -552,9 +562,9 @@ class KMLExporter:
         html += "<ul>"
         
         for device in suspicious_devices:
-            html += f"<li><b>{device.mac}</b> (Score: {device.persistence_score:.2f})<ul>"
+            html += f"<li><b>{_cdata_safe(device.mac)}</b> (Score: {device.persistence_score:.2f})<ul>"
             for reason in device.reasons[:3]:  # Top 3 reasons
-                html += f"<li>{reason}</li>"
+                html += f"<li>{_cdata_safe(reason)}</li>"
             html += "</ul></li>"
         
         html += "</ul>"
@@ -599,12 +609,12 @@ class KMLExporter:
                     duration = device.last_seen - device.first_seen
                     device_path = f'''
     <Placemark>
-        <name>[{threat_level}] Tracking Path: {device.mac}</name>
+        <name>[{threat_level}] Tracking Path: {_xml_safe(device.mac)}</name>
         <description>
             <![CDATA[
             <h3>🎯 DEVICE TRACKING INTELLIGENCE</h3>
             <table border="1" cellpadding="5">
-            <tr><td><b>MAC Address</b></td><td>{device.mac}</td></tr>
+            <tr><td><b>MAC Address</b></td><td>{_cdata_safe(device.mac)}</td></tr>
             <tr><td><b>Persistence Classification</b></td><td>{threat_level} PERSISTENCE</td></tr>
             <tr><td><b>Persistence Score</b></td><td>{device.persistence_score:.3f}/1.000</td></tr>
             <tr><td><b>Surveillance Duration</b></td><td>{duration.total_seconds()/3600:.1f} hours</td></tr>
@@ -616,11 +626,11 @@ class KMLExporter:
             <br/>
             <h4>📊 Persistence Indicators:</h4>
             <ul>
-            {chr(10).join(f'<li>{reason}</li>' for reason in device.reasons)}
+            {chr(10).join(f'<li>{_cdata_safe(reason)}</li>' for reason in device.reasons)}
             </ul>
             <h4>📍 Location Tracking Path:</h4>
             <ol>
-            {chr(10).join(f'<li>{time.strftime("%H:%M")} - {loc}</li>' for time, loc in zip(location_times, locations))}
+            {chr(10).join(f'<li>{time.strftime("%H:%M")} - {_cdata_safe(loc)}</li>' for time, loc in zip(location_times, locations))}
             </ol>
             ]]>
         </description>
@@ -641,20 +651,20 @@ class KMLExporter:
                         
                         device_marker = f'''
     <Placemark>
-        <name>[{threat_level}] {device.mac} @ {session.session_id}</name>
+        <name>[{threat_level}] {_xml_safe(device.mac)} @ {_xml_safe(session.session_id)}</name>
         <description>
             <![CDATA[
             <h3>📱 DEVICE DETECTION EVENT</h3>
             <table border="1" cellpadding="5">
-            <tr><td><b>Device MAC</b></td><td>{device.mac}</td></tr>
-            <tr><td><b>Location</b></td><td>{session.session_id}</td></tr>
+            <tr><td><b>Device MAC</b></td><td>{_cdata_safe(device.mac)}</td></tr>
+            <tr><td><b>Location</b></td><td>{_cdata_safe(session.session_id)}</td></tr>
             <tr><td><b>Persistence Level</b></td><td>{threat_level}</td></tr>
             <tr><td><b>Detection Time</b></td><td>{datetime.fromtimestamp(session.start_time).strftime('%Y-%m-%d %H:%M:%S')}</td></tr>
             <tr><td><b>Duration at Location</b></td><td>{(session.end_time - session.start_time)/60:.1f} minutes</td></tr>
             <tr><td><b>Appearances Here</b></td><td>{len(appearances_here)}</td></tr>
             <tr><td><b>Persistence Score</b></td><td>{device.persistence_score:.3f}</td></tr>
             </table>
-            {f'<h4>📡 Probe Activity:</h4><ul>{chr(10).join(f"<li>{chr(10).join(app.ssids_probed)}</li>" for app in appearances_here[:3] if app.ssids_probed)}</ul>' if any(app.ssids_probed for app in appearances_here[:3]) else '<p>No probe requests captured</p>'}
+            {f'<h4>📡 Probe Activity:</h4><ul>{chr(10).join(f"<li>{chr(10).join(_cdata_safe(s) for s in app.ssids_probed)}</li>" for app in appearances_here[:3] if app.ssids_probed)}</ul>' if any(app.ssids_probed for app in appearances_here[:3]) else '<p>No probe requests captured</p>'}
             ]]>
         </description>
         <styleUrl>{marker_styles.get(threat_level, "#suspiciousDeviceStyle")}</styleUrl>
@@ -694,12 +704,12 @@ class KMLExporter:
                 
                 heatmap_circle = f'''
     <Placemark>
-        <name>🔥 Surveillance Intensity: {location}</name>
+        <name>🔥 Surveillance Intensity: {_xml_safe(location)}</name>
         <description>
             <![CDATA[
             <h3>📊 SURVEILLANCE INTENSITY ANALYSIS</h3>
             <table border="1" cellpadding="5">
-            <tr><td><b>Location</b></td><td>{location}</td></tr>
+            <tr><td><b>Location</b></td><td>{_cdata_safe(location)}</td></tr>
             <tr><td><b>Suspicious Devices</b></td><td>{device_count}</td></tr>
             <tr><td><b>Average Persistence Score</b></td><td>{avg_persistence:.3f}</td></tr>
             <tr><td><b>Maximum Persistence Score</b></td><td>{max_persistence:.3f}</td></tr>
@@ -764,7 +774,7 @@ class KMLExporter:
             <p><b>Implications:</b> Possible workplace surveillance or professional monitoring</p>
             <h4>Affected Devices:</h4>
             <ul>
-            {chr(10).join(f'<li>{device.mac} (Score: {device.persistence_score:.2f})</li>' for device in work_hour_devices)}
+            {chr(10).join(f'<li>{_cdata_safe(device.mac)} (Score: {device.persistence_score:.2f})</li>' for device in work_hour_devices)}
             </ul>
             ]]>
         </description>
@@ -786,7 +796,7 @@ class KMLExporter:
             <p><b>Implications:</b> Possible stalking or personal surveillance</p>
             <h4>Affected Devices:</h4>
             <ul>
-            {chr(10).join(f'<li>{device.mac} (Score: {device.persistence_score:.2f})</li>' for device in off_hour_devices)}
+            {chr(10).join(f'<li>{_cdata_safe(device.mac)} (Score: {device.persistence_score:.2f})</li>' for device in off_hour_devices)}
             </ul>
             ]]>
         </description>
