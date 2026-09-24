@@ -15,10 +15,6 @@ import time
 import threading
 from datetime import datetime
 
-# Set test mode for GUI before any imports
-import os
-os.environ['CYT_TEST_MODE'] = 'true'  # Enable test mode for GUI
-
 class CYTGui:
     def __init__(self):
         self.root = tk.Tk()
@@ -520,9 +516,10 @@ class CYTGui:
     def _run_cyt_background(self):
         """Background CYT execution"""
         try:
-            # Set test mode for non-interactive credential access
+            # The child inherits the operator's environment: an explicit
+            # CYT_TEST_MODE or CYT_MASTER_PASSWORD opt-in propagates, but the
+            # committed test password is never injected by default.
             env = os.environ.copy()
-            env['CYT_TEST_MODE'] = 'true'
             
             process = subprocess.Popen(
                 ['python3', './chasing_your_tail.py'],
@@ -559,7 +556,6 @@ class CYTGui:
         """Background log analysis"""
         try:
             env = os.environ.copy()
-            env['CYT_TEST_MODE'] = 'true'
             
             self.log_message("🔄 Running probe analyzer (this may take several minutes for large datasets)...")
             
@@ -650,7 +646,6 @@ class CYTGui:
         """Background surveillance analysis"""
         try:
             env = os.environ.copy()
-            env['CYT_TEST_MODE'] = 'true'
             
             self.log_message("🔄 Running surveillance analyzer (generating KML for Google Earth)...")
             
