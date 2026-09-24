@@ -143,7 +143,9 @@ class RogueAPDetector:
                 # (and re-deduped) next cycle rather than skipped.
                 logger.error("Failed to persist rogue AP watermark: %s", e)
 
-    def scan_kismet_db(self, db_path: str) -> List[RogueAPAlert]:
+    def scan_kismet_db(
+        self, db_path: str, now: Optional[float] = None
+    ) -> List[RogueAPAlert]:
         """Scan Kismet database for rogue APs. Returns new alerts."""
         new_alerts = []
         self.last_scan_error = None
@@ -152,8 +154,8 @@ class RogueAPDetector:
             conn = connect_readonly(db_path)
 
             try:
-                new_alerts.extend(self._scan_ap_devices(conn))
-                new_alerts.extend(self._scan_ap_alerts(conn))
+                new_alerts.extend(self._scan_ap_devices(conn, now=now))
+                new_alerts.extend(self._scan_ap_alerts(conn, now=now))
             finally:
                 conn.close()
 
@@ -185,12 +187,14 @@ class RogueAPDetector:
         logger.info(f"Rogue AP scan found {len(unique_alerts)} new alerts")
         return unique_alerts
 
-    def _scan_ap_devices(self, conn: sqlite3.Connection) -> List[RogueAPAlert]:
+    def _scan_ap_devices(
+        self, conn: sqlite3.Connection, now: Optional[float] = None
+    ) -> List[RogueAPAlert]:
         """Scan device table for access points advertising monitored SSIDs"""
         alerts = []
         cursor = conn.cursor()
 
-        scan_start = self._scan_start(time.time())
+        scan_start = self._scan_start(time.time() if now is None else float(now))
 
         try:
             # Get all AP-type devices
@@ -368,7 +372,9 @@ class RogueAPDetector:
             expected_channel=primary_trusted.channel,
         )
 
-    def _scan_ap_alerts(self, conn: sqlite3.Connection) -> List[RogueAPAlert]:
+    def _scan_ap_alerts(
+        self, conn: sqlite3.Connection, now: Optional[float] = None
+    ) -> List[RogueAPAlert]:
         """Check Kismet alerts table for AP-related alerts"""
         alerts = []
         cursor = conn.cursor()
@@ -380,7 +386,7 @@ class RogueAPDetector:
             return alerts
 
         try:
-            scan_start = self._scan_start(time.time())
+            scan_start = self._scan_start(time.time() if now is None else float(now))
             cursor.execute(
                 """SELECT ts_sec, header, json FROM alerts
                    WHERE ts_sec >= ?

@@ -146,8 +146,13 @@ class DeauthDetector:
                 # (and re-deduped) next cycle rather than skipped.
                 logger.error("Failed to persist deauth watermark: %s", e)
 
-    def scan_kismet_db(self, db_path: str) -> List[DeauthEvent]:
-        """Scan a Kismet database for deauth activity. Returns new events found."""
+    def scan_kismet_db(
+        self, db_path: str, now: Optional[float] = None
+    ) -> List[DeauthEvent]:
+        """Scan a Kismet database for deauth activity. Returns new events found.
+
+        ``now`` is an injected clock (replay): wall clock only when omitted.
+        """
         new_events = []
         self.last_scan_error = None
 
@@ -155,8 +160,8 @@ class DeauthDetector:
             conn = connect_readonly(db_path)
 
             try:
-                new_events.extend(self._scan_alerts_table(conn))
-                new_events.extend(self._scan_device_deauth_data(conn))
+                new_events.extend(self._scan_alerts_table(conn, now=now))
+                new_events.extend(self._scan_device_deauth_data(conn, now=now))
             finally:
                 conn.close()
 
@@ -188,7 +193,9 @@ class DeauthDetector:
         logger.info(f"Deauth scan found {len(unique_events)} new events")
         return unique_events
 
-    def _scan_alerts_table(self, conn: sqlite3.Connection) -> List[DeauthEvent]:
+    def _scan_alerts_table(
+        self, conn: sqlite3.Connection, now: Optional[float] = None
+    ) -> List[DeauthEvent]:
         """Check Kismet's alerts table for deauth/disassoc alerts"""
         events = []
         cursor = conn.cursor()
@@ -203,7 +210,7 @@ class DeauthDetector:
 
         # Query deauth-related alerts
         try:
-            scan_start = self._scan_start(time.time())
+            scan_start = self._scan_start(time.time() if now is None else float(now))
             cursor.execute(
                 """SELECT ts_sec, header, json FROM alerts
                    WHERE ts_sec >= ?
@@ -257,7 +264,9 @@ class DeauthDetector:
 
         return events
 
-    def _scan_device_deauth_data(self, conn: sqlite3.Connection) -> List[DeauthEvent]:
+    def _scan_device_deauth_data(
+        self, conn: sqlite3.Connection, now: Optional[float] = None
+    ) -> List[DeauthEvent]:
         """Analyze device JSON blobs for deauth frame indicators.
 
         Kismet tracks dot11.device fields that indicate deauth activity
@@ -266,7 +275,7 @@ class DeauthDetector:
         events = []
         cursor = conn.cursor()
 
-        scan_start = self._scan_start(time.time())
+        scan_start = self._scan_start(time.time() if now is None else float(now))
 
         try:
             cursor.execute(

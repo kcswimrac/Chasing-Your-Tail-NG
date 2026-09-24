@@ -96,6 +96,23 @@ def main(argv: list[str] | None = None) -> int:
     fg.add_argument("--type", dest="entity_type", default="wifi_mac")
     fg.add_argument("--key", required=True)
 
+    rp = sub.add_parser(
+        "replay", help="Deterministically replay a labeled scenario session"
+    )
+    rp.add_argument(
+        "--session", required=True, help="Path to scenario JSON document"
+    )
+    rp.add_argument(
+        "--store-path",
+        default=None,
+        help="Directory for the replay store (default: temp dir, removed on exit)",
+    )
+    rp.add_argument(
+        "--json-out",
+        default=None,
+        help="Write the replay report JSON to this path (default: stdout)",
+    )
+
     args = parser.parse_args(argv)
 
     if args.init_store_key:
@@ -171,6 +188,9 @@ def main(argv: list[str] | None = None) -> int:
         finally:
             store.close()
 
+    if args.cmd == "replay":
+        return _replay_cmd(args)
+
     if args.cmd == "baseline":
         return _baseline_cmd(args)
 
@@ -191,6 +211,29 @@ def main(argv: list[str] | None = None) -> int:
         repair_empty_store=args.repair_empty_store,
         max_cycles=args.max_cycles,
     )
+
+
+def _replay_cmd(args) -> int:
+    from pathlib import Path
+
+    from cyt_platform.replay.engine import ReplayEngine
+    from cyt_platform.replay.report import report_bytes
+    from cyt_platform.replay.scenario import ScenarioError, load_scenario
+
+    try:
+        scenario = load_scenario(args.session)
+    except ScenarioError as e:
+        print(f"Scenario error: {e}", file=sys.stderr)
+        return 2
+    engine = ReplayEngine(
+        scenario, store_path=Path(args.store_path) if args.store_path else None
+    )
+    data = report_bytes(engine.run())
+    if args.json_out:
+        Path(args.json_out).write_bytes(data)
+    else:
+        sys.stdout.buffer.write(data)
+    return 0
 
 
 def _baseline_cmd(args) -> int:

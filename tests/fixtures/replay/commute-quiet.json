@@ -1,0 +1,93 @@
+{
+  "scenario_version": 1,
+  "scenario_id": "commute-quiet",
+  "description": "Quiet commute: ordinary devices observed from the operator's moving position, no hostile signals",
+  "session_id": "replay-commute-quiet",
+  "labels": {
+    "kind": "normal",
+    "expect": {
+      "detect": false,
+      "state": "clear"
+    }
+  },
+  "cycles": [
+    {
+      "cycle_id": 1,
+      "clock_ts": 1700000000.0,
+      "rows": [
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "AA:BB:CC:DD:EE:01",
+            "type": "Wi-Fi Client",
+            "last_time": 1699999995.0,
+            "device": {
+              "kismet.device.base.signal": {
+                "kismet.common.signal.last_signal": -60
+              },
+              "kismet.device.base.channel": "6"
+            }
+          }
+        },
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "AA:BB:CC:DD:EE:03",
+            "type": "Wi-Fi AP",
+            "last_time": 1699999997.0,
+            "device": {
+              "dot11.device": {
+                "dot11.device.advertised_ssid_map": [
+                  {
+                    "dot11.advertisedssid.ssid": "CafeGuest",
+                    "dot11.advertisedssid.crypt_string": "Open"
+                  }
+                ]
+              },
+              "kismet.device.base.channel": "11"
+            }
+          }
+        },
+        {
+          "source": "gps",
+          "fix": {
+            "lat": 45.5200,
+            "lon": -122.6800,
+            "ts": 1699999998.0,
+            "accuracy_m": 8.0
+          }
+        }
+      ]
+    },
+    {
+      "cycle_id": 2,
+      "clock_ts": 1700000015.0,
+      "rows": [
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "AA:BB:CC:DD:EE:01",
+            "type": "Wi-Fi Client",
+            "last_time": 1700000012.0,
+            "device": {
+              "kismet.device.base.signal": {
+                "kismet.common.signal.last_signal": -62
+              },
+              "kismet.device.base.channel": "6"
+            }
+          }
+        },
+        {
+          "source": "gps",
+          "fix": {
+            "lat": 45.5201,
+            "lon": -122.6798,
+            "ts": 1700000013.0,
+            "accuracy_m": 9.0
+          }
+        }
+      ]
+    },
+    { "cycle_id": 3, "clock_ts": 1700000030.0, "rows": [] }
+  ]
+}
