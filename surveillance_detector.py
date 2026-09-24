@@ -11,6 +11,13 @@ from dataclasses import dataclass
 from collections import defaultdict
 import pathlib
 
+from input_validation import InputValidator
+
+def _md_safe(value: str) -> str:
+    """Escape RF-sourced text for markdown report lines (pandoc renders the HTML)."""
+    return InputValidator.escape_markdown_text(value)
+
+
 logger = logging.getLogger(__name__)
 
 @dataclass
@@ -231,7 +238,7 @@ class SurveillanceDetector:
         threat_emoji = {"CRITICAL": "🚨", "HIGH": "⚠️", "MEDIUM": "🟡", "LOW": "🔵"}
         emoji = threat_emoji.get(persistence_level, "⚪")
         
-        lines.append(f"#### {emoji} Device Analysis: `{device.mac}`")
+        lines.append(f"#### {emoji} Device Analysis: `{_md_safe(device.mac)}`")
         lines.append("")
         lines.append("*A MAC address is like a unique fingerprint for each wireless device (phone, laptop, etc.)*")
         lines.append("")
@@ -267,7 +274,7 @@ class SurveillanceDetector:
         lines.append("*This shows whether the device follows you to different places*")
         lines.append("")
         lines.append(f"- **Different Locations Seen:** {len(device.locations_seen)}")
-        lines.append(f"- **Specific Locations:** {', '.join(device.locations_seen)}")
+        lines.append(f"- **Specific Locations:** {', '.join(_md_safe(loc) for loc in device.locations_seen)}")
         if len(device.locations_seen) > 1:
             lines.append(f"- **Following Behavior:** ✅ **CONFIRMED** - This device has appeared at multiple locations")
             lines.append("  🚨 **This is a major red flag - normal devices don't follow you around!**")
@@ -279,7 +286,7 @@ class SurveillanceDetector:
         # Behavioral indicators
         lines.append("**Behavioral Threat Indicators:**")
         for i, reason in enumerate(device.reasons, 1):
-            lines.append(f"  {i}. {reason}")
+            lines.append(f"  {i}. {_md_safe(reason)}")
         lines.append("")
         
         # Activity timeline (enhanced)
@@ -287,8 +294,8 @@ class SurveillanceDetector:
         recent_appearances = sorted(device.appearances, key=lambda a: a.timestamp, reverse=True)[:10]
         for appearance in recent_appearances:
             dt = datetime.fromtimestamp(appearance.timestamp)
-            ssids = ', '.join(appearance.ssids_probed[:2]) if appearance.ssids_probed else 'No probes'
-            lines.append(f"- `{dt.strftime('%Y-%m-%d %H:%M:%S')}` | Location: `{appearance.location_id}` | SSIDs: {ssids}")
+            ssids = ', '.join(_md_safe(s) for s in appearance.ssids_probed[:2]) if appearance.ssids_probed else 'No probes'
+            lines.append(f"- `{dt.strftime('%Y-%m-%d %H:%M:%S')}` | Location: `{_md_safe(appearance.location_id)}` | SSIDs: {ssids}")
         
         if len(device.appearances) > 10:
             lines.append(f"- *... and {len(device.appearances) - 10} additional appearances*")
@@ -400,7 +407,7 @@ class SurveillanceDetector:
         
         hotspot_locations = [loc for loc, count in location_frequency.items() if count > 1]
         if hotspot_locations:
-            patterns.append(f"**Surveillance hotspots detected:** {', '.join(hotspot_locations)} - multiple suspicious devices at these locations")
+            patterns.append(f"**Surveillance hotspots detected:** {', '.join(_md_safe(loc) for loc in hotspot_locations)} - multiple suspicious devices at these locations")
         
         # Quick transition analysis
         quick_followers = 0
@@ -439,7 +446,7 @@ class SurveillanceDetector:
                 # Location correlation
                 common_locations = set(device1.locations_seen) & set(device2.locations_seen)
                 if len(common_locations) > 1:
-                    correlations.append(f"**{device1.mac}** and **{device2.mac}** both appear at: {', '.join(common_locations)}")
+                    correlations.append(f"**{_md_safe(device1.mac)}** and **{_md_safe(device2.mac)}** both appear at: {', '.join(_md_safe(loc) for loc in common_locations)}")
                 
                 # Temporal correlation (within 1 hour)
                 temporal_matches = 0
@@ -450,7 +457,7 @@ class SurveillanceDetector:
                             temporal_matches += 1
                 
                 if temporal_matches > 2:
-                    correlations.append(f"**{device1.mac}** and **{device2.mac}** appear together {temporal_matches} times - possible coordinated surveillance")
+                    correlations.append(f"**{_md_safe(device1.mac)}** and **{_md_safe(device2.mac)}** appear together {temporal_matches} times - possible coordinated surveillance")
         
         return correlations
     
