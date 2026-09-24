@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import math
@@ -173,6 +174,31 @@ BEFORE UPDATE ON observations
 BEGIN
   SELECT RAISE(ABORT, 'observations is append-only: record a new observation instead');
 END;
+"""
+
+# Schema v4, D3 identity hypotheses: links between two radio identities are
+# stored as confidence-rated hypotheses with reasons — never silently merged.
+# This completes the build spec's v4 store definition (which names
+# identity_hypotheses alongside observations); the DDL is idempotent and runs
+# on every open so stores already at v4 pick the table up without a schema
+# version bump. Keys follow the observations.identity_key decision: stored
+# unencrypted so provenance/idempotency queries stay deterministic; at-rest
+# lifecycle is owned by retention (D8).
+SCHEMA_V4_IDENTITY = """
+CREATE TABLE IF NOT EXISTS identity_hypotheses (
+  hypothesis_id  TEXT PRIMARY KEY,
+  key_a          TEXT NOT NULL CHECK (length(key_a) > 0),
+  key_b          TEXT NOT NULL CHECK (length(key_b) > 0),
+  confidence     REAL NOT NULL,
+  status         TEXT NOT NULL CHECK (status IN ('candidate','linked','rejected')),
+  reasons_json   TEXT NOT NULL DEFAULT '[]',
+  created_ts     REAL NOT NULL,
+  updated_ts     REAL NOT NULL,
+  CHECK (key_a < key_b)
+);
+CREATE INDEX IF NOT EXISTS idx_hyp_status ON identity_hypotheses(status, updated_ts DESC);
+CREATE INDEX IF NOT EXISTS idx_hyp_key_a ON identity_hypotheses(key_a);
+CREATE INDEX IF NOT EXISTS idx_hyp_key_b ON identity_hypotheses(key_b);
 """
 
 
@@ -350,6 +376,11 @@ class CytStore:
                 "INSERT OR REPLACE INTO schema_meta(key, value) VALUES (?, ?)",
                 ("version", "4"),
             )
+        # D3 completes the v4 store definition with identity_hypotheses.
+        # Idempotent DDL (CREATE IF NOT EXISTS) so databases already at v4
+        # pick the table up on next open — no schema_meta bump, this is part
+        # of v4, not a new schema version.
+        c.executescript(SCHEMA_V4_IDENTITY)
 
     def _migrate_v2(self, c: sqlite3.Cursor) -> None:
         c.execute(
@@ -1373,4 +1404,182 @@ class CytStore:
         params.append(max(1, min(int(limit), 5000)))
         rows = self.conn.execute(sql, tuple(params)).fetchall()
         return [self._observation_row_to_dict(r) for r in rows]
+
+    # --- identity hypotheses (schema v4, D3) ---
+    @staticmethod
+    def _hypothesis_row_to_dict(row: sqlite3.Row) -> dict:
+        out = dict(row)
+        reasons_json = out.pop("reasons_json", None)
+        if reasons_json:
+            try:
+                out["reasons"] = json.loads(reasons_json)
+            except json.JSONDecodeError:
+                out["reasons"] = []
+        else:
+            out["reasons"] = []
+        return out
+
+    def upsert_identity_hypothesis(
+        self,
+        *,
+        key_a: str,
+        key_b: str,
+        confidence: float,
+        status: str,
+        reasons: List[str],
+        ts: float,
+    ) -> dict:
+        """Persist one scored identity-link hypothesis; returns the stored row.
+
+        Keys are canonicalized (key_a < key_b) and hypothesis_id derives from
+        the sorted pair, so A→B and B→A are the same hypothesis. Merge rules:
+        a co-observation veto ('rejected') is sticky and demotes any prior
+        state; otherwise confidence is monotone up and the best-scoring
+        evaluation's status and reasons stand. Lower re-scores never downgrade
+        a hypothesis (decay is incident territory, not hypothesis territory).
+        """
+        a, b = sorted((str(key_a), str(key_b)))
+        if a == b:
+            raise ValueError("identity hypothesis requires two distinct keys")
+        if status not in ("candidate", "linked", "rejected"):
+            raise ValueError(f"invalid hypothesis status: {status}")
+        conf = max(0.0, min(1.0, float(confidence)))
+        hid = hashlib.sha256(f"{a}|{b}".encode("utf-8")).hexdigest()[:16]
+        reasons_json = json.dumps(list(reasons))
+        ts_f = float(ts)
+
+        row = self.conn.execute(
+            "SELECT status, confidence FROM identity_hypotheses WHERE hypothesis_id = ?",
+            (hid,),
+        ).fetchone()
+        if row is None:
+            self.conn.execute(
+                """
+                INSERT INTO identity_hypotheses(
+                  hypothesis_id, key_a, key_b, confidence, status,
+                  reasons_json, created_ts, updated_ts
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (hid, a, b, conf, status, reasons_json, ts_f, ts_f),
+            )
+        elif row["status"] == "rejected":
+            pass  # veto is sticky — later scores cannot resurrect the link
+        elif status == "rejected":
+            self.conn.execute(
+                """
+                UPDATE identity_hypotheses
+                SET confidence=0.0, status='rejected', reasons_json=?, updated_ts=?
+                WHERE hypothesis_id=?
+                """,
+                (reasons_json, ts_f, hid),
+            )
+        elif conf >= row["confidence"]:
+            self.conn.execute(
+                """
+                UPDATE identity_hypotheses
+                SET confidence=?, status=?, reasons_json=?, updated_ts=?
+                WHERE hypothesis_id=?
+                """,
+                (conf, status, reasons_json, ts_f, hid),
+            )
+        else:
+            self.conn.execute(
+                "UPDATE identity_hypotheses SET updated_ts=? WHERE hypothesis_id=?",
+                (ts_f, hid),
+            )
+        stored = self.get_identity_hypothesis(hid)
+        if stored is None:  # pragma: no cover - defensive; row was just written
+            raise RuntimeError(f"hypothesis {hid} missing after upsert")
+        return stored
+
+    def get_identity_hypothesis(self, hypothesis_id: str) -> Optional[dict]:
+        row = self.conn.execute(
+            "SELECT * FROM identity_hypotheses WHERE hypothesis_id = ?",
+            (str(hypothesis_id),),
+        ).fetchone()
+        if row is None:
+            return None
+        return self._hypothesis_row_to_dict(row)
+
+    def list_identity_hypotheses(
+        self,
+        *,
+        status: Optional[str] = None,
+        key: Optional[str] = None,
+        limit: int = 200,
+    ) -> List[dict]:
+        """List hypotheses, optionally filtered by status or either key.
+
+        All filters are parameterized; results order by confidence so the
+        strongest links surface first.
+        """
+        clauses: List[str] = []
+        params: List[object] = []
+        if status is not None:
+            clauses.append("status = ?")
+            params.append(status)
+        if key is not None:
+            clauses.append("(key_a = ? OR key_b = ?)")
+            params.extend([key, key])
+        sql = "SELECT * FROM identity_hypotheses"
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+        sql += " ORDER BY confidence DESC, key_a ASC LIMIT ?"
+        params.append(max(1, min(int(limit), 5000)))
+        rows = self.conn.execute(sql, tuple(params)).fetchall()
+        return [self._hypothesis_row_to_dict(r) for r in rows]
+
+    def macs_for_fingerprint(self, fingerprint_id: int) -> List[str]:
+        """Decrypted identity keys for every entity linked to a fingerprint row.
+
+        Supports hypothesis pairing across cycles: identities sharing a
+        persisted fingerprint are candidates for the same device claim.
+        """
+        rows = self.conn.execute(
+            """
+            SELECT e.key AS key FROM entity_fingerprints ef
+            JOIN entities e ON e.id = ef.entity_id
+            WHERE ef.fingerprint_id = ?
+            """,
+            (int(fingerprint_id),),
+        ).fetchall()
+        return [self._dec_key(r["key"]) for r in rows]
+
+    def features_for_identity(self, entity_type: str, key: str) -> List[dict]:
+        """Fingerprint rows linked to an identity key (additive query, D3).
+
+        Prior-cycle identities are not in the current device list, so the
+        fingerprint features they presented come from this join. Returns dicts
+        with fingerprint_id, fingerprint_type, fingerprint_hash, features.
+        """
+        store_key = self._enc_key(key)
+        rows = self.conn.execute(
+            """
+            SELECT f.id AS id, f.fingerprint_type AS fingerprint_type,
+                   f.fingerprint_hash AS fingerprint_hash,
+                   f.features_json AS features_json
+            FROM entities e
+            JOIN entity_fingerprints ef ON ef.entity_id = e.id
+            JOIN fingerprints f ON f.id = ef.fingerprint_id
+            WHERE e.entity_type = ? AND (e.key = ? OR e.key = ?)
+            """,
+            (entity_type, store_key, key),
+        ).fetchall()
+        out: List[dict] = []
+        for r in rows:
+            features = None
+            if r["features_json"]:
+                try:
+                    features = json.loads(r["features_json"])
+                except json.JSONDecodeError:
+                    features = None
+            out.append(
+                {
+                    "fingerprint_id": int(r["id"]),
+                    "fingerprint_type": r["fingerprint_type"],
+                    "fingerprint_hash": r["fingerprint_hash"],
+                    "features": features,
+                }
+            )
+        return out
 
