@@ -206,3 +206,56 @@ def test_purge_noop_when_nothing_expired(store: CytStore):
     assert sum(counts.values()) == 0
     assert count(store, "observations") == BULK_OBS
     assert count(store, "incidents") == 2
+
+
+def test_hypothesis_retention_only_stale_candidates(store: CytStore):
+    """candidate class: stale candidates go; linked/rejected are load-bearing."""
+    fresh = BASE + 100 * DAYS
+    ent_cut = fresh - 30 * DAYS  # matches purge's entity cutoff
+    store.upsert_identity_hypothesis(
+        key_a="AA:00:00:00:00:01",
+        key_b="AA:00:00:00:00:02",
+        confidence=0.4,
+        status="candidate",
+        reasons=["probe-SSID Jaccard 0.4"],
+        ts=ent_cut - 1,  # stale candidate → purged
+    )
+    store.upsert_identity_hypothesis(
+        key_a="AA:00:00:00:00:03",
+        key_b="AA:00:00:00:00:04",
+        confidence=0.5,
+        status="candidate",
+        reasons=[],
+        ts=fresh - 60,  # fresh candidate → kept
+    )
+    store.upsert_identity_hypothesis(
+        key_a="AA:00:00:00:00:05",
+        key_b="AA:00:00:00:00:06",
+        confidence=0.86,
+        status="linked",
+        reasons=["co-observed never"],
+        ts=ent_cut - 1,  # stale linked → kept (detection joins depend on it)
+    )
+    store.upsert_identity_hypothesis(
+        key_a="AA:00:00:00:00:07",
+        key_b="AA:00:00:00:00:08",
+        confidence=0.0,
+        status="rejected",
+        reasons=["co-observation veto"],
+        ts=ent_cut - 1,  # stale rejected → kept (prevents relink churn)
+    )
+
+    counts = store.purge_retention(now=fresh)
+
+    assert counts["identity_hypotheses"] == 1
+    remaining = {
+        (r["key_a"], r["key_b"], r["status"])
+        for r in store.conn.execute(
+            "SELECT key_a, key_b, status FROM identity_hypotheses"
+        ).fetchall()
+    }
+    assert remaining == {
+        ("AA:00:00:00:00:03", "AA:00:00:00:00:04", "candidate"),
+        ("AA:00:00:00:00:05", "AA:00:00:00:00:06", "linked"),
+        ("AA:00:00:00:00:07", "AA:00:00:00:00:08", "rejected"),
+    }

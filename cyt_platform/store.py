@@ -55,6 +55,11 @@ RETENTION_CLASSES: Dict[str, str] = {
     "schema_meta": "keep",
     "runtime_state": "keep",
     "baselines": "keep",
+    # identity_hypotheses: stale "candidate" rows purge with the entity
+    # window — they regenerate as evidence recurs. "linked" hypotheses are
+    # load-bearing for detection joins and "rejected" ones prevent relink
+    # churn, so only stale candidates are eligible.
+    "identity_hypotheses": "candidate",
 }
 
 SCHEMA_V1 = """
@@ -1123,6 +1128,14 @@ class CytStore:
             "DELETE FROM entities WHERE last_seen < ? AND ignore=0 "
             "AND NOT EXISTS (SELECT 1 FROM incidents i WHERE i.entity_id = entities.id) "
             "AND NOT EXISTS (SELECT 1 FROM entity_fingerprints ef WHERE ef.entity_id = entities.id)",
+            (ent_cut,),
+        ).rowcount
+        # identity_hypotheses "candidate" class: only stale candidates go —
+        # linked rows are load-bearing for detection joins, rejected rows
+        # prevent relink churn.
+        counts["identity_hypotheses"] = c.execute(
+            "DELETE FROM identity_hypotheses "
+            "WHERE status='candidate' AND updated_ts < ?",
             (ent_cut,),
         ).rowcount
         counts["push_sent"] = c.execute(
