@@ -88,6 +88,15 @@ DEFAULTS: Dict[str, Any] = {
     "ie_fingerprint": {
         "enabled": True,
         "min_probe_ssids": 1,
+        # D3 identity hypothesis policy floors. Signal weights are fixed in
+        # cyt_platform.identity (locked decision 8 — transparent, auditable
+        # scoring); these are the configurable policy knobs.
+        "candidate_floor": 0.30,
+        "link_threshold": 0.70,
+        "relink_alert_floor": 0.95,
+        "min_support": 2,
+        "co_window_s": 30.0,
+        "handoff_max_s": 300.0,
     },
     "ble_tracker": {
         "enabled": True,

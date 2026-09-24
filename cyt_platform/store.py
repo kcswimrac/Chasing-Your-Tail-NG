@@ -1545,3 +1545,41 @@ class CytStore:
         ).fetchall()
         return [self._dec_key(r["key"]) for r in rows]
 
+    def features_for_identity(self, entity_type: str, key: str) -> List[dict]:
+        """Fingerprint rows linked to an identity key (additive query, D3).
+
+        Prior-cycle identities are not in the current device list, so the
+        fingerprint features they presented come from this join. Returns dicts
+        with fingerprint_id, fingerprint_type, fingerprint_hash, features.
+        """
+        store_key = self._enc_key(key)
+        rows = self.conn.execute(
+            """
+            SELECT f.id AS id, f.fingerprint_type AS fingerprint_type,
+                   f.fingerprint_hash AS fingerprint_hash,
+                   f.features_json AS features_json
+            FROM entities e
+            JOIN entity_fingerprints ef ON ef.entity_id = e.id
+            JOIN fingerprints f ON f.id = ef.fingerprint_id
+            WHERE e.entity_type = ? AND (e.key = ? OR e.key = ?)
+            """,
+            (entity_type, store_key, key),
+        ).fetchall()
+        out: List[dict] = []
+        for r in rows:
+            features = None
+            if r["features_json"]:
+                try:
+                    features = json.loads(r["features_json"])
+                except json.JSONDecodeError:
+                    features = None
+            out.append(
+                {
+                    "fingerprint_id": int(r["id"]),
+                    "fingerprint_type": r["fingerprint_type"],
+                    "fingerprint_hash": r["fingerprint_hash"],
+                    "features": features,
+                }
+            )
+        return out
+
