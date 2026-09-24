@@ -52,6 +52,24 @@ def write_led_files(runtime_dir: Path, led: str, snapshot: Optional[dict]) -> No
     json_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
+def update_led_files(runtime_dir: Path, led: str, snapshot: Optional[dict]) -> bool:
+    """Write LED files only when the LED mode actually changed.
+
+    D8 LED wear: led.state lives on flash on deployed units; rewriting it
+    every poll cycle wears the storage for zero information. Returns True
+    when files were (re)written.
+    """
+    state_path = runtime_dir / "led.state"
+    try:
+        previous = state_path.read_text(encoding="utf-8").strip()
+    except OSError:
+        previous = None
+    if previous == led:
+        return False
+    write_led_files(runtime_dir, led, snapshot)
+    return True
+
+
 def apply_sysfs(led: str, sysfs_path: Optional[str]) -> None:
     """Best-effort brightness write for a single-color sysfs LED."""
     if not sysfs_path:
@@ -117,7 +135,6 @@ def run_led_loop(
     sysfs = led_cfg.get("sysfs_brightness")
     gpio_cfg = led_cfg.get("gpio") or {}
 
-    last_led = None
     while True:
         snap = read_status(status_path)
         if snap is None:
@@ -128,13 +145,12 @@ def run_led_loop(
             reason = snap.get("reason") or ""
             led = state_to_led(state)
 
-        write_led_files(runtime, led, snap)
-        apply_sysfs(led, sysfs)
-        apply_gpio(led, gpio_cfg)
-
-        if console and led != last_led:
-            print(ansi_line(led, state, reason), flush=True)
-            last_led = led
+        # D8: file writes and hardware blips happen only on LED state change.
+        if update_led_files(runtime, led, snap):
+            apply_sysfs(led, sysfs)
+            apply_gpio(led, gpio_cfg)
+            if console:
+                print(ansi_line(led, state, reason), flush=True)
 
         if once:
             return 0

@@ -27,6 +27,12 @@ from cyt_platform.rf_plugins import RFPluginRunner
 from cyt_platform.sinks.log_file import LogFileSink, NullSink
 from cyt_platform.status import StatusEngine
 from cyt_platform.store import CytStore
+from cyt_platform.windows import (
+    collect_window_sets,
+    load_window_sets,
+    merge_into_monitor,
+    save_window_sets,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -190,6 +196,25 @@ def run(
                             resolver.just_rolled,
                         )
                         monitor.initialize_tracking_lists(kdb)
+                        # D8: rehydrate window state persisted by a previous
+                        # session — the capture DB may have rolled during the
+                        # outage, and a follower must not get a 20-minute
+                        # grace period on every restart.
+                        try:
+                            rehydrated = load_window_sets(store, now=time.time())
+                            if rehydrated is not None:
+                                merged = merge_into_monitor(monitor, rehydrated)
+                                if merged:
+                                    log.info(
+                                        "Window rehydration: %s subjects carried "
+                                        "over from previous session",
+                                        merged,
+                                    )
+                        except Exception as we:
+                            log.warning(
+                                "Window rehydration skipped: %s",
+                                sanitize_error(we),
+                            )
                     monitor.process_current_activity(kdb)
                     if cycle % list_update_interval == 0:
                         monitor.rotate_tracking_lists(kdb)
@@ -236,6 +261,18 @@ def run(
                         store.set_runtime("last_rf_stats", str(rf_stats))
                     if cycle % 10 == 0:
                         store.purge_retention(now)
+                    if cycle % list_update_interval == 0:
+                        # D8: snapshot window state on every rotation cadence
+                        # so a crash loses at most one rotation of history.
+                        save_window_sets(store, collect_window_sets(monitor), now)
+
+                if cycle % 10 == 0:
+                    try:
+                        # D8: outside the transaction — incremental vacuum
+                        # actually shrinks the file after purge.
+                        store.vacuum_incremental()
+                    except Exception as ve:
+                        log.warning("Incremental vacuum skipped: %s", sanitize_error(ve))
 
                 if seal_every > 0 and cycle % seal_every == 0:
                     try:
@@ -285,19 +322,37 @@ def run(
                 now = time.time()
                 detail = sanitize_error(e)
                 log.error("Cycle %s error: %s", cycle, detail)
-                with store.transaction():
-                    store.close_stale_incidents(now, close_after)
-                    store.write_heartbeat(
-                        "analyzer", ok=False, cycle=cycle, detail=detail
+                try:
+                    with store.transaction():
+                        store.close_stale_incidents(now, close_after)
+                        store.write_heartbeat(
+                            "analyzer", ok=False, cycle=cycle, detail=detail
+                        )
+                except Exception as fe:
+                    # D8: a failure-path store write (e.g. ENOSPC) must not
+                    # escape the handler and kill the loop.
+                    log.error(
+                        "Cycle %s failure-path store write failed: %s",
+                        cycle,
+                        sanitize_error(fe),
                     )
-                status.publish_fail(
-                    reason="analyzer_error",
-                    consecutive_fails=consecutive_fails,
-                    cycle=cycle,
-                    db_label=getattr(resolver, "current", None)
-                    and os.path.basename(resolver.current or "")
-                    or "",
-                )
+                try:
+                    status.publish_fail(
+                        reason="analyzer_error",
+                        consecutive_fails=consecutive_fails,
+                        cycle=cycle,
+                        db_label=getattr(resolver, "current", None)
+                        and os.path.basename(resolver.current or "")
+                        or "",
+                    )
+                except Exception as pe:
+                    # D8 audit P0: publish_fail itself must never be the
+                    # exception that parks the unit.
+                    log.error(
+                        "Cycle %s status publish failed: %s",
+                        cycle,
+                        sanitize_error(pe),
+                    )
                 notify.watchdog()
                 if exit_on_fail and consecutive_fails >= fail_threshold:
                     log.error("Too many consecutive failures; exiting %s", EX_TEMPFAIL)
@@ -306,6 +361,12 @@ def run(
             _sleep_remaining(check_interval, t0)
 
     finally:
+        try:
+            # D8: persist window state so the next boot rehydrates instead
+            # of giving a follower a fresh 20-minute grace period.
+            save_window_sets(store, collect_window_sets(monitor), time.time())
+        except Exception:
+            pass
         try:
             with store.transaction():
                 store.write_heartbeat(

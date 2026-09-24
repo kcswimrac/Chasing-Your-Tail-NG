@@ -29,6 +29,39 @@ from cyt_platform.privacy import chmod_private_file, ensure_dir
 
 logger = logging.getLogger(__name__)
 
+# D8 retention classes: every user table is classified exactly once.
+#
+#   raw     — high-churn sensor data; ages out fastest
+#             (heartbeat_keep_days / observation_retention_days)
+#   medium  — sightings, aggregates, and audit trails
+#             (retention_days)
+#   entity  — identity rows (entity_retention_days, non-ignored only)
+#   closed  — incidents, purged only after closing (retention_days)
+#   sent    — delivery queue rows, purged after delivery (retention_days)
+#   keep    — never purged: operational state or operator-confirmed learning
+RETENTION_CLASSES: Dict[str, str] = {
+    "observations": "raw",
+    "heartbeats": "raw",
+    "events": "medium",
+    "status_history": "medium",
+    "location_sightings": "medium",
+    "cotravel": "medium",
+    "fingerprints": "medium",
+    "entity_fingerprints": "medium",
+    "baseline_sightings": "medium",
+    "incidents": "closed",
+    "entities": "entity",
+    "push_queue": "sent",
+    "schema_meta": "keep",
+    "runtime_state": "keep",
+    "baselines": "keep",
+    # identity_hypotheses: stale "candidate" rows purge with the entity
+    # window — they regenerate as evidence recurs. "linked" hypotheses are
+    # load-bearing for detection joins and "rejected" ones prevent relink
+    # churn, so only stale candidates are eligible.
+    "identity_hypotheses": "candidate",
+}
+
 SCHEMA_V1 = """
 CREATE TABLE IF NOT EXISTS schema_meta (
   key   TEXT PRIMARY KEY,
@@ -335,13 +368,35 @@ class CytStore:
         sync = (self.cfg.get("synchronous") or "NORMAL").upper()
         if sync not in ("OFF", "NORMAL", "FULL", "EXTRA"):
             sync = "NORMAL"
+        # Each pragma returns a row; fetch it so the statement finalizes —
+        # unconsumed cursors make the later VACUUM fail with
+        # "SQL statements in progress".
         c = self.conn.cursor()
-        c.execute("PRAGMA journal_mode=WAL")
-        c.execute(f"PRAGMA synchronous={sync}")
-        c.execute("PRAGMA temp_store=MEMORY")
-        c.execute("PRAGMA foreign_keys=ON")
-        c.execute("PRAGMA busy_timeout=5000")
-        c.execute("PRAGMA wal_autocheckpoint=1000")
+        c.execute("PRAGMA journal_mode=WAL").fetchall()
+        c.execute(f"PRAGMA synchronous={sync}").fetchall()
+        c.execute("PRAGMA temp_store=MEMORY").fetchall()
+        c.execute("PRAGMA foreign_keys=ON").fetchall()
+        c.execute("PRAGMA busy_timeout=5000").fetchall()
+        c.execute("PRAGMA wal_autocheckpoint=1000").fetchall()
+        self._enable_incremental_vacuum()
+
+    def _enable_incremental_vacuum(self) -> None:
+        """D8: incremental vacuum so purged rows actually leave the file.
+
+        Without auto_vacuum, DELETE only moves pages to the freelist —
+        deleted identifiers stay recoverable in the file until a full
+        VACUUM. auto_vacuum=INCREMENTAL lets purge reclaim space in
+        bounded chunks (vacuum_incremental). The mode only takes effect
+        on a rebuilt database, so an existing DB is rebuilt once here;
+        fresh databases pick the mode up before their first table exists.
+        """
+        try:
+            av = int(self.conn.execute("PRAGMA auto_vacuum").fetchone()[0])
+            if av != 2:  # 0=NONE, 1=FULL, 2=INCREMENTAL
+                self.conn.execute("PRAGMA auto_vacuum=INCREMENTAL")
+                self.conn.execute("VACUUM")
+        except sqlite3.Error as e:
+            logger.warning("incremental vacuum setup failed: %s", e)
 
     def migrate(self) -> None:
         c = self.conn.cursor()
@@ -1018,36 +1073,102 @@ class CytStore:
         return cur.rowcount
 
     def purge_retention(self, now: Optional[float] = None) -> Dict[str, int]:
+        """Purge every table per its retention class; return per-table row counts.
+
+        Retention is the only sanctioned deletion path for observations:
+        explicit, bounded, and class-driven — never incidental. Space is
+        reclaimed by vacuum_incremental (run outside any transaction).
+        """
         now = now or time.time()
-        days = float(self.cfg.get("retention_days") or 14)
+        medium_days = float(self.cfg.get("retention_days") or 14)
         hb_days = float(self.cfg.get("heartbeat_keep_days") or 7)
         ent_days = float(self.cfg.get("entity_retention_days") or 30)
-        cut = now - days * 86400
+        obs_days = float(self.cfg.get("observation_retention_days") or 7)
+        medium_cut = now - medium_days * 86400
         hb_cut = now - hb_days * 86400
         ent_cut = now - ent_days * 86400
+        obs_cut = now - obs_days * 86400
         c = self.conn.cursor()
-        r1 = c.execute("DELETE FROM events WHERE ts < ?", (cut,)).rowcount
-        r2 = c.execute(
-            "DELETE FROM incidents WHERE status='closed' AND COALESCE(closed_at, last_seen) < ?",
-            (cut,),
+        counts: Dict[str, int] = {}
+        counts["observations"] = c.execute(
+            "DELETE FROM observations WHERE ts < ?", (obs_cut,)
         ).rowcount
-        r3 = c.execute("DELETE FROM status_history WHERE ts < ?", (cut,)).rowcount
-        r4 = c.execute("DELETE FROM heartbeats WHERE ts < ?", (hb_cut,)).rowcount
-        r5 = c.execute(
-            "DELETE FROM entities WHERE last_seen < ? AND ignore=0",
+        counts["heartbeats"] = c.execute(
+            "DELETE FROM heartbeats WHERE ts < ?", (hb_cut,)
+        ).rowcount
+        counts["events"] = c.execute(
+            "DELETE FROM events WHERE ts < ?", (medium_cut,)
+        ).rowcount
+        counts["status_history"] = c.execute(
+            "DELETE FROM status_history WHERE ts < ?", (medium_cut,)
+        ).rowcount
+        counts["location_sightings"] = c.execute(
+            "DELETE FROM location_sightings WHERE last_seen < ?", (medium_cut,)
+        ).rowcount
+        counts["cotravel"] = c.execute(
+            "DELETE FROM cotravel WHERE last_seen < ?", (medium_cut,)
+        ).rowcount
+        counts["fingerprints"] = c.execute(
+            "DELETE FROM fingerprints WHERE last_seen < ?", (medium_cut,)
+        ).rowcount
+        counts["entity_fingerprints"] = c.execute(
+            "DELETE FROM entity_fingerprints WHERE linked_ts < ?", (medium_cut,)
+        ).rowcount
+        counts["baseline_sightings"] = c.execute(
+            "DELETE FROM baseline_sightings WHERE ts < ?", (medium_cut,)
+        ).rowcount
+        counts["incidents"] = c.execute(
+            "DELETE FROM incidents WHERE status='closed' AND COALESCE(closed_at, last_seen) < ?",
+            (medium_cut,),
+        ).rowcount
+        # Entities referenced by surviving rows (open incidents, live
+        # fingerprint links) are pinned — FKs must not break and the
+        # reference chain is the audit trail.
+        counts["entities"] = c.execute(
+            "DELETE FROM entities WHERE last_seen < ? AND ignore=0 "
+            "AND NOT EXISTS (SELECT 1 FROM incidents i WHERE i.entity_id = entities.id) "
+            "AND NOT EXISTS (SELECT 1 FROM entity_fingerprints ef WHERE ef.entity_id = entities.id)",
             (ent_cut,),
         ).rowcount
-        r6 = c.execute(
-            "DELETE FROM push_queue WHERE status='sent' AND COALESCE(sent_ts, created_ts) < ?",
-            (cut,),
+        # identity_hypotheses "candidate" class: only stale candidates go —
+        # linked rows are load-bearing for detection joins, rejected rows
+        # prevent relink churn.
+        counts["identity_hypotheses"] = c.execute(
+            "DELETE FROM identity_hypotheses "
+            "WHERE status='candidate' AND updated_ts < ?",
+            (ent_cut,),
         ).rowcount
+        counts["push_sent"] = c.execute(
+            "DELETE FROM push_queue WHERE status='sent' AND COALESCE(sent_ts, created_ts) < ?",
+            (medium_cut,),
+        ).rowcount
+        return counts
+
+    def vacuum_incremental(self, max_pages: int = 512) -> Dict[str, int]:
+        """Reclaim file space after purge via incremental vacuum.
+
+        Must be called OUTSIDE a store transaction (it runs its own).
+        Returns page/freelist counts before and after so callers — and the
+        D8 retention test — can assert real space reclamation, not just
+        row deletion.
+        """
+        if self._in_txn:
+            raise RuntimeError(
+                "vacuum_incremental must run outside a store transaction"
+            )
+        self.checkpoint()
+        c = self.conn.cursor()
+        pages_before = int(c.execute("PRAGMA page_count").fetchone()[0])
+        free_before = int(c.execute("PRAGMA freelist_count").fetchone()[0])
+        try:
+            c.execute("PRAGMA incremental_vacuum(%d)" % max(1, int(max_pages)))
+        except sqlite3.Error as e:
+            logger.warning("incremental_vacuum failed: %s", e)
         return {
-            "events": r1,
-            "incidents": r2,
-            "status_history": r3,
-            "heartbeats": r4,
-            "entities": r5,
-            "push_sent": r6,
+            "page_count_before": pages_before,
+            "freelist_before": free_before,
+            "page_count": int(c.execute("PRAGMA page_count").fetchone()[0]),
+            "freelist_count": int(c.execute("PRAGMA freelist_count").fetchone()[0]),
         }
 
     # --- P2/P3 helpers ---
