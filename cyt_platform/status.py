@@ -8,6 +8,7 @@ fail > alert > watch > degraded > clear.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 from dataclasses import dataclass
@@ -16,6 +17,8 @@ from typing import Any, Dict, Optional
 
 from cyt_platform.privacy import chmod_private_file, ensure_dir
 from cyt_platform.store import CytStore, StatusInputs
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -31,6 +34,12 @@ class StatusEngine:
         self.config = config
         self.status_cfg = config.get("status") or {}
         self.path = Path(self.status_cfg.get("file") or "data/run/status.json")
+        # D8 ENOSPC parking: a failed status write (disk full, read-only fs)
+        # parks publishing instead of crashing the cycle; the next
+        # successful write unparks. detectable via status.parked_publish().
+        self._publish_parked = False
+        self._park_reason: Optional[str] = None
+        self._last_attempted: Optional[dict] = None
 
     def publish(
         self,
@@ -199,12 +208,67 @@ class StatusEngine:
         except Exception:
             snapshot["evidence"] = []
 
-        self._write_atomic(snapshot)
+        # D8: a status write failure (ENOSPC, read-only fs) must not kill the
+        # analysis cycle — the publish parks and the next successful write
+        # unparks. Storage stays the component to blame in the reason.
+        self._last_attempted = json.loads(json.dumps(snapshot))
+        try:
+            self._write_atomic(snapshot)
+            self._publish_parked = False
+            self._park_reason = None
+        except OSError as e:
+            if not self._publish_parked:
+                logger.error("status publish parked (write failed): %s", e)
+            self._publish_parked = True
+            self._park_reason = f"status_write_failed: {e}"
+            snapshot["state"] = state
+            snapshot["parked"] = True
+            snapshot["park_reason"] = self._park_reason
         try:
             self.store.append_status_history(state, reason, snapshot)
         except Exception:
             pass
         return snapshot
+
+    def parked_publish(self) -> bool:
+        """True while status writes are failing (e.g. ENOSPC)."""
+        return self._publish_parked
+
+    def park_reason(self) -> Optional[str]:
+        return self._park_reason
+
+    def recover_publish(self) -> bool:
+        """Attempt one status write to clear a parked publish.
+
+        Returns True when publishing is healthy again. Recovery is
+        verify-by-write: only a successful disk write unparks. The last
+        attempted snapshot (true computed state) is re-written — never a
+        fabricated "clear", which would silence a safety device.
+        """
+        if not self._publish_parked:
+            return True
+        if self._last_attempted is not None:
+            probe = json.loads(json.dumps(self._last_attempted))  # deep copy
+            probe["parked"] = False
+            probe["recovered_at"] = time.time()
+        else:
+            probe = {
+                "schema_version": 1,
+                "state": "fail",
+                "reason": "publish_recovery_probe",
+                "parked": False,
+                "updated_at": time.time(),
+            }
+        try:
+            self._write_atomic(probe)
+        except OSError as e:
+            logger.debug("publish still parked: %s", e)
+            return False
+        self._publish_parked = False
+        reason = self._park_reason
+        self._park_reason = None
+        logger.info("status publish recovered: %s", reason)
+        return True
 
     def publish_fail(
         self,
