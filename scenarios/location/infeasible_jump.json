@@ -1,0 +1,40 @@
+{
+  "scenario": "location.visits.infeasible_jump",
+  "spec": "D5",
+  "description": "Operator appears 250 mi north 10 minutes after leaving \u2014 a GPS artifact transition, not travel.",
+  "expect": {
+    "detect": true,
+    "pre_filter_visit_count": 2,
+    "independent_visit_count": 1
+  },
+  "sightings": [
+    {
+      "identity": "operator",
+      "lat": 33.4,
+      "lon": -112.0,
+      "ts": 1758732000,
+      "accuracy_m": 5.0
+    },
+    {
+      "identity": "operator",
+      "lat": 33.4,
+      "lon": -112.0,
+      "ts": 1758732300,
+      "accuracy_m": 5.0
+    },
+    {
+      "identity": "operator",
+      "lat": 37.018295443406124,
+      "lon": -112.0,
+      "ts": 1758732600,
+      "accuracy_m": 5.0
+    },
+    {
+      "identity": "operator",
+      "lat": 37.018295443406124,
+      "lon": -112.0,
+      "ts": 1758732900,
+      "accuracy_m": 5.0
+    }
+  ]
+}

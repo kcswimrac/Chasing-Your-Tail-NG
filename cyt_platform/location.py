@@ -24,7 +24,7 @@ from __future__ import annotations
 import hashlib
 import math
 from dataclasses import dataclass
-from typing import List, Optional, Sequence
+from typing import List, Optional, Sequence, Tuple
 
 # Spec D5 defaults. The live fusion allows config overrides (gps_fusion.*).
 # merge radius: spec default max(2 x gps_accuracy, 30) — bounded, not a grid.
@@ -137,7 +137,7 @@ def cluster_sightings(
     clusters 10 km apart stay separate.
     """
     ordered = _sorted_sightings(sightings)
-    assign = assign_clusters(ordered, merge_radius_m=merge_radius_m)
+    leaders, assign = _cluster_leaders(ordered, merge_radius_m)
     members: List[List[Sighting]] = []
     for s, idx in zip(ordered, assign):
         while len(members) <= idx:
@@ -157,3 +157,159 @@ def cluster_sightings(
             )
         )
     return sorted(clusters, key=lambda c: (c.first_ts, c.cluster_id))
+
+
+def _cluster_leaders(
+    ordered: Sequence[Sighting], merge_radius_m: float
+) -> Tuple[List[Sighting], List[int]]:
+    """Leader per cluster and the cluster index of each (sorted) sighting."""
+    leaders: List[Sighting] = []
+    assign: List[int] = []
+    for s in ordered:
+        idx: Optional[int] = None
+        for i, leader in enumerate(leaders):
+            if haversine_m(leader.lat, leader.lon, s.lat, s.lon) <= merge_radius_m:
+                idx = i
+                break
+        if idx is None:
+            leaders.append(s)
+            idx = len(leaders) - 1
+        assign.append(idx)
+    return leaders, assign
+
+
+def path_visits(
+    sightings: Sequence[Sighting],
+    *,
+    merge_radius_m: float = DEFAULT_MERGE_RADIUS_M,
+    revisit_gap_s: float = DEFAULT_REVISIT_GAP_S,
+) -> List[Visit]:
+    """Split a time-ordered sighting sequence into distinct place visits.
+
+    A visit ends when the sequence moves to a different cluster (the
+    observer left) or when the gap since the previous same-cluster
+    sighting exceeds ``revisit_gap_s`` (departure assumed). Re-entering a
+    cluster therefore starts a NEW visit — re-entry counts twice, which
+    pure cell counting could never express.
+    """
+    ordered = _sorted_sightings(sightings)
+    if not ordered:
+        return []
+    leaders, assign = _cluster_leaders(ordered, merge_radius_m)
+
+    def _close(idx: int, enter: float, exit: Optional[float], acc: float) -> Visit:
+        leader = leaders[idx]
+        return Visit(
+            cluster_id=stable_cluster_id(leader.lat, leader.lon),
+            enter_ts=enter,
+            exit_ts=exit,
+            lat=leader.lat,
+            lon=leader.lon,
+            accuracy_m=acc,
+        )
+
+    visits: List[Visit] = []
+    cur_idx: Optional[int] = None
+    enter_ts = 0.0
+    last_ts = 0.0
+    cur_acc = 0.0
+    for s, idx in zip(ordered, assign):
+        if idx != cur_idx:
+            if cur_idx is not None:
+                visits.append(_close(cur_idx, enter_ts, last_ts, cur_acc))
+            cur_idx, enter_ts, last_ts, cur_acc = idx, s.ts, s.ts, s.accuracy_m
+        elif s.ts - last_ts > revisit_gap_s:
+            visits.append(_close(idx, enter_ts, last_ts, cur_acc))
+            enter_ts, last_ts, cur_acc = s.ts, s.ts, s.accuracy_m
+        else:
+            last_ts = s.ts
+            cur_acc = max(cur_acc, s.accuracy_m)
+    assert cur_idx is not None  # ordered is non-empty
+    # The final visit stays open (exit None) — the observer was still there
+    # when the window ended; overlap logic extends it by revisit_gap_s.
+    visits.append(_close(cur_idx, enter_ts, None, cur_acc))
+    return visits
+
+
+def _transition_feasible(prev: Visit, nxt: Visit, *, max_speed_mps: float) -> bool:
+    """Whether travel from ``prev`` to ``nxt`` is physically possible.
+
+    distance <= max_speed * dt + 2 x accuracy. Infeasible transitions are
+    GPS artifacts (or spoofing), not movement.
+    """
+    anchor_ts = prev.exit_ts if prev.exit_ts is not None else prev.enter_ts
+    dt = max(nxt.enter_ts - anchor_ts, 0.0)
+    dist = haversine_m(prev.lat, prev.lon, nxt.lat, nxt.lon)
+    allowance = max_speed_mps * dt + 2.0 * max(prev.accuracy_m, nxt.accuracy_m)
+    return dist <= allowance
+
+
+def independent_visits(
+    sightings: Sequence[Sighting],
+    *,
+    merge_radius_m: float = DEFAULT_MERGE_RADIUS_M,
+    revisit_gap_s: float = DEFAULT_REVISIT_GAP_S,
+    max_speed_mps: float = DEFAULT_MAX_SPEED_MPS,
+) -> List[Visit]:
+    """Distinct visits a sighting sequence makes, in time order.
+
+    1. Cluster sightings by haversine radius (not grid cells).
+    2. Split re-entries of the same cluster into distinct visits when the
+       observer left the cluster in between.
+    3. Drop visits whose arrival is physically infeasible from the last
+       credible visit: distance > max_speed * dt + 2 x accuracy (e.g. a
+       250 mi jump in 10 minutes is a GPS artifact, not a visited place).
+    """
+    visits = path_visits(
+        sightings, merge_radius_m=merge_radius_m, revisit_gap_s=revisit_gap_s
+    )
+    kept: List[Visit] = []
+    for v in visits:  # path_visits yields time-ordered visits
+        if not kept or _transition_feasible(kept[-1], v, max_speed_mps=max_speed_mps):
+            kept.append(v)
+        # else: arrival faster than max_speed from the last credible
+        # visit — dropped as a location artifact, not counted as travel.
+    return kept
+
+
+def visits_overlap(
+    a: Visit, b: Visit, *, revisit_gap_s: float = DEFAULT_REVISIT_GAP_S
+) -> bool:
+    """Whether two visits' time windows overlap.
+
+    An open visit (exit_ts None) is treated as still occupied for
+    revisit_gap_s after its last sighting.
+    """
+    a_end = a.exit_ts if a.exit_ts is not None else a.enter_ts + revisit_gap_s
+    b_end = b.exit_ts if b.exit_ts is not None else b.enter_ts + revisit_gap_s
+    return a.enter_ts <= b_end and b.enter_ts <= a_end
+
+
+# Two visits are co-located when their anchors sit within one merge radius
+# each of the shared place (leaders may differ between observers).
+COTRAVEL_ANCHOR_RADIUS_FACTOR = 2.0
+
+
+def cotravel_matches(
+    entity_visits: Sequence[Visit],
+    operator_visits: Sequence[Visit],
+    *,
+    merge_radius_m: float = DEFAULT_MERGE_RADIUS_M,
+    revisit_gap_s: float = DEFAULT_REVISIT_GAP_S,
+) -> List[Tuple[Visit, Visit]]:
+    """Pair (entity_visit, operator_visit) co-located in space and time.
+
+    This is the operator-path join the audit found missing: a match means
+    the entity was where the operator was, while the operator was there.
+    A device seen at two places the operator never visited matches nothing.
+    """
+    threshold_m = COTRAVEL_ANCHOR_RADIUS_FACTOR * merge_radius_m
+    matches: List[Tuple[Visit, Visit]] = []
+    for ev in entity_visits:
+        for ov in operator_visits:
+            if (
+                haversine_m(ev.lat, ev.lon, ov.lat, ov.lon) <= threshold_m
+                and visits_overlap(ev, ov, revisit_gap_s=revisit_gap_s)
+            ):
+                matches.append((ev, ov))
+    return matches

@@ -10,20 +10,29 @@ operator's own visited places — the audit's docstring-lie fix.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import time
 from dataclasses import dataclass
-from typing import Any, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from cyt_platform.location import (
     DEFAULT_MERGE_RADIUS_M,
+    DEFAULT_MAX_SPEED_MPS,
     DEFAULT_REVISIT_GAP_S,
+    Sighting,
+    cotravel_matches,
     haversine_m,
+    independent_visits,
     stable_cluster_id,
 )
 
 logger = logging.getLogger(__name__)
+
+# How far back co-travel scoring looks for observations. Co-travel is a
+# multi-place relationship, not a single-cycle event.
+COTRAVEL_LOOKBACK_S = 6 * 3600.0
 
 
 @dataclass
@@ -100,6 +109,27 @@ def extract_gps_from_device_json(device_data: dict) -> Optional[Tuple[float, flo
     return lat_f, lon_f, ts_f
 
 
+def _sighting_from_row(row: dict, identity: str) -> Sighting:
+    """One located observation row -> geometry Sighting (CytStore API dicts)."""
+    return Sighting(
+        ts=float(row["ts"]),
+        lat=float(row["lat"]),
+        lon=float(row["lon"]),
+        accuracy_m=float(row.get("accuracy_m") or 0.0),
+        identity_key=identity,
+    )
+
+
+def _sightings_from_rows(rows: List[dict], identity: str) -> List[Sighting]:
+    """Located observation rows -> Sighting list (drops unlocated rows)."""
+    out: List[Sighting] = []
+    for row in rows:
+        if row.get("lat") is None or row.get("lon") is None:
+            continue
+        out.append(_sighting_from_row(row, identity))
+    return out
+
+
 class LiveGpsFusion:
     """Track operator path from Kismet GPS + score co-traveling devices.
 
@@ -124,6 +154,9 @@ class LiveGpsFusion:
         self.min_span_s = float(self.cfg.get("min_span_seconds") or 900)
         self.revisit_gap_s = float(
             self.cfg.get("revisit_gap_s") or DEFAULT_REVISIT_GAP_S
+        )
+        self.max_speed_mps = float(
+            self.cfg.get("max_speed_mps") or DEFAULT_MAX_SPEED_MPS
         )
         self.last_fix: Optional[GpsFix] = None
         self.operator_path: List[_ClusterAnchor] = []
@@ -273,53 +306,126 @@ class LiveGpsFusion:
         return best
 
     def score_cotravel(self, now: Optional[float] = None) -> List[dict]:
-        """
-        Entities seen in >= min_locations clusters along operator path.
-        Writes/updates cotravel table; returns top results.
+        """Score entities co-present with the operator at distinct places.
+
+        Co-travel requires the operator's own path: an entity is scored
+        only when it was co-located (within the merge radius, with
+        overlapping time) with at least ``min_locations`` DISTINCT
+        operator visits. A device seen at two places the operator never
+        visited does not co-travel — this is the audit's docstring-lie
+        fix, where the SQL counted cells with no operator join at all.
+
+        Sightings are read from canonical observations via the CytStore
+        API only. Writes/updates the cotravel table and returns scored
+        results sorted by score.
         """
         if not self.enabled:
             return []
         now = now or time.time()
-        rows = self.store.conn.execute(
-            """
-            SELECT entity_type, entity_key,
-                   COUNT(DISTINCT location_id) AS location_count,
-                   MIN(first_seen) AS first_seen,
-                   MAX(last_seen) AS last_seen,
-                   SUM(see_count) AS sees
-            FROM location_sightings
-            GROUP BY entity_type, entity_key
-            HAVING location_count >= ?
-            """,
-            (self.min_locations,),
-        ).fetchall()
-        results = []
-        for r in rows:
-            span = float(r["last_seen"]) - float(r["first_seen"])
+        lookback_s = float(self.cfg.get("cotravel_lookback_s") or COTRAVEL_LOOKBACK_S)
+        since = now - lookback_s
+
+        from cyt_platform import observations as obs  # lazy: obs imports this module
+
+        op_rows = self.store.query_observations(
+            identity_key=obs.OPERATOR_IDENTITY,
+            source=obs.SOURCE_GPS,
+            kind=obs.KIND_GPS_FIX,
+            since=since,
+            limit=5000,
+        )
+        op_sightings = _sightings_from_rows(op_rows, identity=obs.OPERATOR_IDENTITY)
+        if len(op_sightings) < 2:
+            return []  # no operator path yet — nothing can co-travel with it
+        op_visits = independent_visits(
+            op_sightings,
+            merge_radius_m=self.merge_radius_m,
+            revisit_gap_s=self.revisit_gap_s,
+            max_speed_mps=self.max_speed_mps,
+        )
+        if not op_visits:
+            return []
+
+        device_rows = self.store.query_observations(
+            source=obs.SOURCE_KISMET_DEVICES,
+            kind=obs.KIND_WIFI_DEVICE,
+            since=since,
+            limit=5000,
+        )
+        by_identity: Dict[str, List[Sighting]] = {}
+        for row in device_rows:
+            if row.get("lat") is None or row.get("lon") is None:
+                continue
+            key = row.get("identity_key") or ""
+            if not key or key == obs.OPERATOR_IDENTITY:
+                continue
+            if self.store.entity_is_ignored("wifi_mac", key):
+                continue
+            by_identity.setdefault(key, []).append(_sighting_from_row(row, key))
+
+        results: List[dict] = []
+        for key in sorted(by_identity):
+            sightings = by_identity[key]
+            entity_visits = independent_visits(
+                sightings,
+                merge_radius_m=self.merge_radius_m,
+                revisit_gap_s=self.revisit_gap_s,
+                max_speed_mps=self.max_speed_mps,
+            )
+            matches = cotravel_matches(
+                entity_visits,
+                op_visits,
+                merge_radius_m=self.merge_radius_m,
+                revisit_gap_s=self.revisit_gap_s,
+            )
+            # Distinct operator visits co-presenced (an entity may match the
+            # same operator visit with several of its own visits).
+            matched_ops = {(ov.enter_ts, ov.cluster_id) for _, ov in matches}
+            locs = len(matched_ops)
+            if locs < self.min_locations:
+                continue
+            first_ts = min(ev.enter_ts for ev, _ in matches)
+            last_ts = max(
+                (ev.exit_ts if ev.exit_ts is not None else ev.enter_ts)
+                for ev, _ in matches
+            )
+            span = last_ts - first_ts
             if span < self.min_span_s:
                 continue
-            # score: locations * log(span hours) * log(sees)
-            locs = int(r["location_count"])
-            sees = int(r["sees"] or 1)
-            score = min(1.0, (locs / 5.0) * 0.5 + min(span / 3600.0, 6) / 12.0 + min(sees, 20) / 40.0)
+            sees = len(sightings)
+            score = min(
+                1.0,
+                (locs / 5.0) * 0.5
+                + min(span / 3600.0, 6) / 12.0
+                + min(sees, 20) / 40.0,
+            )
             detail = {
                 "locations": locs,
                 "span_hours": round(span / 3600.0, 2),
                 "sees": sees,
+                "operator_visits": [
+                    {
+                        "enter_ts": ov.enter_ts,
+                        "lat": round(ov.lat, 6),
+                        "lon": round(ov.lon, 6),
+                        "cluster_id": ov.cluster_id,
+                    }
+                    for _, ov in sorted(matches, key=lambda m: m[1].enter_ts)
+                ],
             }
             self.store.upsert_cotravel(
-                r["entity_type"],
-                r["entity_key"],
+                "wifi_mac",
+                key,
                 location_count=locs,
                 score=score,
-                first_seen=float(r["first_seen"]),
-                last_seen=float(r["last_seen"]),
+                first_seen=first_ts,
+                last_seen=last_ts,
                 detail=detail,
             )
             results.append(
                 {
-                    "entity_type": r["entity_type"],
-                    "entity_key": r["entity_key"],
+                    "entity_type": "wifi_mac",
+                    "entity_key": key,
                     "location_count": locs,
                     "score": score,
                     "detail": detail,
@@ -329,22 +435,25 @@ class LiveGpsFusion:
             if score >= float(self.cfg.get("incident_score_threshold") or 0.55):
                 self.store.observe_incident(
                     event_type="cotravel",
-                    subject=r["entity_key"],
+                    subject=key,
                     window_label="multi-loc",
                     severity="alert" if score >= 0.75 else "watch",
                     session_id=self.store.get_runtime("session_id") or "gps",
                     observed_at=now,
                     summary=f"cotravel score={score:.2f} locs={locs}",
                     detail=detail,
-                    entity_type=r["entity_type"],
+                    entity_type="wifi_mac",
                     evidence={
                         "reasons": [
-                            f"Co-traveled across {locs} location clusters",
-                            f"span {detail['span_hours']}h",
+                            f"Co-located with the operator at {locs} distinct places",
+                            f"co-travel span {detail['span_hours']}h",
                             f"score={score:.2f}",
                         ],
                         "kind": "cotravel",
-                        "subject_fp": abs(hash(r["entity_key"])) % 0xFFFFFFFF,
+                        # stable digest, not hash(): replay determinism
+                        "subject_fp": int(
+                            hashlib.sha1(key.encode("utf-8")).hexdigest()[:8], 16
+                        ),
                     },
                 )
         results.sort(key=lambda x: x["score"], reverse=True)

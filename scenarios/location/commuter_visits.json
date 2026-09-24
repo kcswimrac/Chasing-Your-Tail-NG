@@ -1,0 +1,302 @@
+{
+  "scenario": "location.visits.commuter",
+  "spec": "D5",
+  "description": "Operator home -> cafe -> office -> home again; a follower is co-present at every visit; a mall-only device never co-travels.",
+  "expect": {
+    "detect": true,
+    "operator_visit_count": 4,
+    "follower_locations": 4,
+    "offpath_detected": false
+  },
+  "sightings": [
+    {
+      "identity": "operator",
+      "lat": 33.4,
+      "lon": -112.0,
+      "ts": 1758732000,
+      "accuracy_m": 5.0
+    },
+    {
+      "identity": "operator",
+      "lat": 33.4,
+      "lon": -112.0,
+      "ts": 1758732300,
+      "accuracy_m": 5.0
+    },
+    {
+      "identity": "operator",
+      "lat": 33.4,
+      "lon": -112.0,
+      "ts": 1758732600,
+      "accuracy_m": 5.0
+    },
+    {
+      "identity": "operator",
+      "lat": 33.4,
+      "lon": -112.0,
+      "ts": 1758732900,
+      "accuracy_m": 5.0
+    },
+    {
+      "identity": "operator",
+      "lat": 33.4,
+      "lon": -112.0,
+      "ts": 1758733200,
+      "accuracy_m": 5.0
+    },
+    {
+      "identity": "operator",
+      "lat": 33.4,
+      "lon": -112.0,
+      "ts": 1758733500,
+      "accuracy_m": 5.0
+    },
+    {
+      "identity": "operator",
+      "lat": 33.4,
+      "lon": -112.0,
+      "ts": 1758733800,
+      "accuracy_m": 5.0
+    },
+    {
+      "identity": "operator",
+      "lat": 33.418,
+      "lon": -111.995,
+      "ts": 1758734400,
+      "accuracy_m": 5.0
+    },
+    {
+      "identity": "operator",
+      "lat": 33.418,
+      "lon": -111.995,
+      "ts": 1758734700,
+      "accuracy_m": 5.0
+    },
+    {
+      "identity": "operator",
+      "lat": 33.418,
+      "lon": -111.995,
+      "ts": 1758735000,
+      "accuracy_m": 5.0
+    },
+    {
+      "identity": "operator",
+      "lat": 33.418,
+      "lon": -111.995,
+      "ts": 1758735300,
+      "accuracy_m": 5.0
+    },
+    {
+      "identity": "operator",
+      "lat": 33.418,
+      "lon": -111.995,
+      "ts": 1758735600,
+      "accuracy_m": 5.0
+    },
+    {
+      "identity": "operator",
+      "lat": 33.46,
+      "lon": -111.94,
+      "ts": 1758736200,
+      "accuracy_m": 5.0
+    },
+    {
+      "identity": "operator",
+      "lat": 33.46,
+      "lon": -111.94,
+      "ts": 1758736500,
+      "accuracy_m": 5.0
+    },
+    {
+      "identity": "operator",
+      "lat": 33.46,
+      "lon": -111.94,
+      "ts": 1758736800,
+      "accuracy_m": 5.0
+    },
+    {
+      "identity": "operator",
+      "lat": 33.46,
+      "lon": -111.94,
+      "ts": 1758737100,
+      "accuracy_m": 5.0
+    },
+    {
+      "identity": "operator",
+      "lat": 33.46,
+      "lon": -111.94,
+      "ts": 1758737400,
+      "accuracy_m": 5.0
+    },
+    {
+      "identity": "operator",
+      "lat": 33.4,
+      "lon": -112.0,
+      "ts": 1758738300,
+      "accuracy_m": 5.0
+    },
+    {
+      "identity": "operator",
+      "lat": 33.4,
+      "lon": -112.0,
+      "ts": 1758738600,
+      "accuracy_m": 5.0
+    },
+    {
+      "identity": "AA:00:00:00:00:01",
+      "lat": 33.40015,
+      "lon": -111.99985,
+      "ts": 1758732100
+    },
+    {
+      "identity": "AA:00:00:00:00:01",
+      "lat": 33.40015,
+      "lon": -111.99985,
+      "ts": 1758732300
+    },
+    {
+      "identity": "AA:00:00:00:00:01",
+      "lat": 33.40015,
+      "lon": -111.99985,
+      "ts": 1758732500
+    },
+    {
+      "identity": "AA:00:00:00:00:01",
+      "lat": 33.40015,
+      "lon": -111.99985,
+      "ts": 1758732700
+    },
+    {
+      "identity": "AA:00:00:00:00:01",
+      "lat": 33.40015,
+      "lon": -111.99985,
+      "ts": 1758732900
+    },
+    {
+      "identity": "AA:00:00:00:00:01",
+      "lat": 33.40015,
+      "lon": -111.99985,
+      "ts": 1758733100
+    },
+    {
+      "identity": "AA:00:00:00:00:01",
+      "lat": 33.40015,
+      "lon": -111.99985,
+      "ts": 1758733300
+    },
+    {
+      "identity": "AA:00:00:00:00:01",
+      "lat": 33.40015,
+      "lon": -111.99985,
+      "ts": 1758733500
+    },
+    {
+      "identity": "AA:00:00:00:00:01",
+      "lat": 33.40015,
+      "lon": -111.99985,
+      "ts": 1758733700
+    },
+    {
+      "identity": "AA:00:00:00:00:01",
+      "lat": 33.41815,
+      "lon": -111.99485,
+      "ts": 1758734500
+    },
+    {
+      "identity": "AA:00:00:00:00:01",
+      "lat": 33.41815,
+      "lon": -111.99485,
+      "ts": 1758734700
+    },
+    {
+      "identity": "AA:00:00:00:00:01",
+      "lat": 33.41815,
+      "lon": -111.99485,
+      "ts": 1758734900
+    },
+    {
+      "identity": "AA:00:00:00:00:01",
+      "lat": 33.41815,
+      "lon": -111.99485,
+      "ts": 1758735100
+    },
+    {
+      "identity": "AA:00:00:00:00:01",
+      "lat": 33.41815,
+      "lon": -111.99485,
+      "ts": 1758735300
+    },
+    {
+      "identity": "AA:00:00:00:00:01",
+      "lat": 33.41815,
+      "lon": -111.99485,
+      "ts": 1758735500
+    },
+    {
+      "identity": "AA:00:00:00:00:01",
+      "lat": 33.46015,
+      "lon": -111.93984999999999,
+      "ts": 1758736300
+    },
+    {
+      "identity": "AA:00:00:00:00:01",
+      "lat": 33.46015,
+      "lon": -111.93984999999999,
+      "ts": 1758736500
+    },
+    {
+      "identity": "AA:00:00:00:00:01",
+      "lat": 33.46015,
+      "lon": -111.93984999999999,
+      "ts": 1758736700
+    },
+    {
+      "identity": "AA:00:00:00:00:01",
+      "lat": 33.46015,
+      "lon": -111.93984999999999,
+      "ts": 1758736900
+    },
+    {
+      "identity": "AA:00:00:00:00:01",
+      "lat": 33.46015,
+      "lon": -111.93984999999999,
+      "ts": 1758737100
+    },
+    {
+      "identity": "AA:00:00:00:00:01",
+      "lat": 33.46015,
+      "lon": -111.93984999999999,
+      "ts": 1758737300
+    },
+    {
+      "identity": "AA:00:00:00:00:01",
+      "lat": 33.40015,
+      "lon": -111.99985,
+      "ts": 1758738350
+    },
+    {
+      "identity": "AA:00:00:00:00:01",
+      "lat": 33.40015,
+      "lon": -111.99985,
+      "ts": 1758738550
+    },
+    {
+      "identity": "AA:00:00:00:00:02",
+      "lat": 33.55,
+      "lon": -112.2,
+      "ts": 1758733000
+    },
+    {
+      "identity": "AA:00:00:00:00:02",
+      "lat": 33.55,
+      "lon": -112.2,
+      "ts": 1758735000
+    },
+    {
+      "identity": "AA:00:00:00:00:02",
+      "lat": 33.55,
+      "lon": -112.2,
+      "ts": 1758737000
+    }
+  ]
+}
