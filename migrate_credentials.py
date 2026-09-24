@@ -47,15 +47,11 @@ def main():
             cred_manager.store_credential('wigle', 'encoded_token', wigle_config['encoded_token'])
             print("✅ WiGLE API token stored securely")
     
-    # Remove API keys from config
-    config_backup = config.copy()
+    # Remove API keys from the in-memory config. The original config.json
+    # (still on disk, still containing the keys) is deliberately NOT copied:
+    # a plaintext backup would re-expose the very secrets just secured and
+    # the original file already serves as the operator's rollback copy.
     config.pop('api_keys', None)
-    
-    # Create backup of original config
-    backup_file = 'config_backup.json'
-    with open(backup_file, 'w') as f:
-        json.dump(config_backup, f, indent=2)
-    print(f"💾 Original config backed up to: {backup_file}")
     
     # Save sanitized config
     sanitized_file = 'config_secure.json'
@@ -69,8 +65,8 @@ def main():
     print("1. Review the sanitized config: config_secure.json")
     print("2. Replace config.json with config_secure.json:")
     print("   mv config_secure.json config.json")
-    print("3. Securely delete the backup if not needed:")
-    print("   shred -vfz-3 config_backup.json")
+    print("3. Securely delete the original config.json once replaced:")
+    print("   shred -vfz-3 config.json")
     print("\n⚠️  IMPORTANT: Your API keys are now encrypted and require a master password!")
 
 if __name__ == '__main__':
