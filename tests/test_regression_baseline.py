@@ -7,7 +7,6 @@ from pathlib import Path
 
 import chasing_your_tail
 import secure_database
-import secure_main_logic
 from secure_main_logic import MatchEvent, SecureCYTMonitor
 
 

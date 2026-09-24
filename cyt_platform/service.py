@@ -216,7 +216,9 @@ def run(
                 deduper.set_place(place_id)
                 if place_id:
                     store.set_runtime("current_place", place_id)
-                    last_gps_place = place_id
+                    # Write-only today: seeds the sticky last-known-place
+                    # fallback (GPS dropout) arriving with the trust build.
+                    last_gps_place = place_id  # noqa: F841
 
                 with store.transaction():
                     deduper.flush()

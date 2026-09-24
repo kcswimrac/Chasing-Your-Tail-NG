@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from typing import Optional, TextIO
+from typing import TextIO
 
 from cyt_platform.privacy import chmod_private_file, ensure_dir, redact_subject
 

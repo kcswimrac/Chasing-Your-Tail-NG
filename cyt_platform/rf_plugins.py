@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict
 
 logger = logging.getLogger(__name__)
 
@@ -171,7 +171,7 @@ class RFPluginRunner:
             severity=severity,
             session_id=self.store.get_runtime("session_id") or "rf",
             observed_at=getattr(al, "timestamp", None) or now,
-            summary=f"rogue_ap ssid_present",
+            summary="rogue_ap ssid_present",
             detail={"ssid_len": len(str(ssid)), "reasons": reasons[:5]},
             entity_type="wifi_ap",
             evidence={

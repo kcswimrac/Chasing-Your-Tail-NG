@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 import logging.handlers
 from pathlib import Path
-from typing import Optional
 
 from cyt_platform.privacy import chmod_private_file, ensure_dir
 
