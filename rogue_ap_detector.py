@@ -14,10 +14,16 @@ import json
 import logging
 import time
 from datetime import datetime
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Callable, Dict, List, Optional, Set, Tuple
 from dataclasses import dataclass, field
 from collections import defaultdict
 from pathlib import Path
+
+from cyt_platform.kismet_ro import (
+    connect_readonly,
+    coerce_watermark,
+    scan_start_from_watermark,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +61,12 @@ class RogueAPAlert:
 class RogueAPDetector:
     """Detects rogue access points and evil twin attacks from Kismet data"""
 
-    def __init__(self, config: Dict):
+    def __init__(
+        self,
+        config: Dict,
+        watermark_loader: Optional[Callable[[], Optional[float]]] = None,
+        watermark_saver: Optional[Callable[[float], None]] = None,
+    ):
         self.config = config
 
         rogue_config = config.get('rogue_ap_detection', {})
@@ -88,15 +99,57 @@ class RogueAPDetector:
         # Detection state
         self.alerts: List[RogueAPAlert] = []
         self.seen_bssids: Dict[str, Set[str]] = defaultdict(set)  # ssid -> set of bssids
+        # Max look-back for a scan with no (or a stale) persisted watermark;
+        # bounds replay of old capture data after a restart.
+        self.catchup_window_seconds = float(
+            rogue_config.get('catchup_window_seconds', 1800)
+        )
+        # Watermark: epoch second just past the newest durably handled alert.
+        # Persisted by the host (store-backed) so a restart never re-reads
+        # processed history; 0.0 means no watermark (first run).
+        self._watermark_loader = watermark_loader
+        self._watermark_saver = watermark_saver
         self.last_scan_time: float = 0.0
+        self.last_scan_error: Optional[str] = None
+        persisted = coerce_watermark(
+            watermark_loader() if watermark_loader else None
+        )
+        if persisted is not None:
+            self.last_scan_time = persisted
+
+    def _scan_start(self, now: float) -> float:
+        """Earliest timestamp this scan should read (see kismet_ro)."""
+        return scan_start_from_watermark(
+            self.last_scan_time, now, self.catchup_window_seconds
+        )
+
+    def _advance_watermark(self, max_alert_ts: float) -> None:
+        """Advance the watermark past processed alerts.
+
+        Called only after a clean scan; the saver write participates in the
+        caller's store transaction (if any), so the watermark commits atomically
+        with the incidents derived from these alerts — it never runs ahead of
+        durable handling.
+        """
+        candidate = max_alert_ts + 1.0
+        if candidate <= self.last_scan_time:
+            return
+        self.last_scan_time = candidate
+        if self._watermark_saver is not None:
+            try:
+                self._watermark_saver(candidate)
+            except Exception as e:
+                # Safe direction: watermark stays behind, alerts are re-read
+                # (and re-deduped) next cycle rather than skipped.
+                logger.error("Failed to persist rogue AP watermark: %s", e)
 
     def scan_kismet_db(self, db_path: str) -> List[RogueAPAlert]:
         """Scan Kismet database for rogue APs. Returns new alerts."""
         new_alerts = []
+        self.last_scan_error = None
 
         try:
-            conn = sqlite3.connect(db_path, timeout=30.0)
-            conn.row_factory = sqlite3.Row
+            conn = connect_readonly(db_path)
 
             try:
                 new_alerts.extend(self._scan_ap_devices(conn))
@@ -105,9 +158,11 @@ class RogueAPDetector:
                 conn.close()
 
         except sqlite3.Error as e:
-            logger.error(f"Database error scanning for rogue APs: {e}")
+            self.last_scan_error = f"kismet_db_error: {e}"
+            logger.error("Database error scanning for rogue APs: %s", e)
         except Exception as e:
-            logger.error(f"Error scanning for rogue APs: {e}")
+            self.last_scan_error = f"scan_error: {e}"
+            logger.error("Error scanning for rogue APs: %s", e)
 
         # Deduplicate alerts
         seen = set()
@@ -119,7 +174,13 @@ class RogueAPDetector:
                 unique_alerts.append(alert)
 
         self.alerts.extend(unique_alerts)
-        self.last_scan_time = time.time()
+
+        # Watermark advances on clean scans only; a failed scan must not
+        # skip past data it could not read.
+        if self.last_scan_error is None and unique_alerts:
+            self._advance_watermark(
+                max(alert.timestamp for alert in unique_alerts)
+            )
 
         logger.info(f"Rogue AP scan found {len(unique_alerts)} new alerts")
         return unique_alerts
@@ -129,7 +190,7 @@ class RogueAPDetector:
         alerts = []
         cursor = conn.cursor()
 
-        scan_start = self.last_scan_time if self.last_scan_time > 0 else 0
+        scan_start = self._scan_start(time.time())
 
         try:
             # Get all AP-type devices
@@ -319,7 +380,7 @@ class RogueAPDetector:
             return alerts
 
         try:
-            scan_start = self.last_scan_time if self.last_scan_time > 0 else 0
+            scan_start = self._scan_start(time.time())
             cursor.execute(
                 """SELECT ts_sec, header, json FROM alerts
                    WHERE ts_sec >= ?

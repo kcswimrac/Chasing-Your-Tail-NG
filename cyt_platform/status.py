@@ -1,4 +1,9 @@
-"""Deterministic status engine: clear | watch | alert | fail with hold_seconds."""
+"""Deterministic status engine: clear | degraded | watch | alert | fail with hold_seconds.
+
+``degraded`` means the detection surface is reduced — one or more RF plugins
+are failing — so a ``clear`` reading would be unreliable. Priority:
+fail > alert > watch > degraded > clear.
+"""
 
 from __future__ import annotations
 
@@ -40,12 +45,15 @@ class StatusEngine:
         kismet_proc_ok: Optional[bool] = None,
         force_fail: bool = False,
         fail_reason: Optional[str] = None,
+        detector_failures: Optional[Dict[str, str]] = None,
     ) -> dict:
         hold = float(self.status_cfg.get("hold_seconds") or 300)
         stale_s = float(self.status_cfg.get("stale_seconds") or 150)
         deaf_s = float(self.status_cfg.get("deaf_seconds") or 180)
         deaf_is_fail = bool(self.status_cfg.get("deaf_is_fail", True))
         quiet_is_watch = bool(self.status_cfg.get("quiet_is_watch", False))
+
+        detector_failures = detector_failures or {}
 
         inputs: StatusInputs = self.store.get_status_inputs(hold)
         now = inputs.now
@@ -113,6 +121,10 @@ class StatusEngine:
         elif threat_level >= 1 or quiet_watch:
             state = "watch"
             reason = "quiet_rf" if quiet_watch and threat_level == 0 else "open_watch_incidents"
+        elif detector_failures:
+            # A failing detector means we cannot see; "clear" would be a lie.
+            state = "degraded"
+            reason = "detector_failures: " + ", ".join(sorted(detector_failures))
         else:
             state = "clear"
             reason = "healthy"
@@ -150,6 +162,18 @@ class StatusEngine:
                 },
                 "kismet_proc": {
                     "ok": True if kismet_proc_ok is None else bool(kismet_proc_ok),
+                },
+                "detectors": {
+                    "ok": not detector_failures,
+                    "failed": dict(detector_failures),
+                    "detail": (
+                        "; ".join(
+                            f"{name}: {det_failures_detail}"
+                            for name, det_failures_detail in sorted(detector_failures.items())
+                        )
+                        if detector_failures
+                        else "ok"
+                    ),
                 },
                 "capture": capture,
             },
