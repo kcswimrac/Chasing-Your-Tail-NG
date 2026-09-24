@@ -75,6 +75,15 @@ DEFAULTS: Dict[str, Any] = {
         "min_locations_for_cotravel": 2,
         "min_span_seconds": 900,
         "incident_score_threshold": 0.55,
+        # D5 location-independence geometry (None -> location.py defaults):
+        # haversine merge radius for places, revisit gap that splits
+        # re-entries into distinct visits, feasibility cap, and how far
+        # back co-travel scoring looks.
+        "merge_radius_m": None,
+        "revisit_gap_s": 600,
+        "max_speed_mps": 35,
+        "cotravel_lookback_s": 21600,
+        "density_window_s": 300,
     },
     "ie_fingerprint": {
         "enabled": True,

@@ -7,8 +7,14 @@ from pathlib import Path
 
 from cyt_platform.ble_tracker import BLETrackerEngine, tracker_score
 from cyt_platform.debrief import generate_debrief
-from cyt_platform.gps_live import LiveGpsFusion, cluster_id, extract_gps_from_device_json
+from cyt_platform.gps_live import LiveGpsFusion, extract_gps_from_device_json
 from cyt_platform.ie_fingerprint import IEFingerprintEngine, extract_ie_fingerprint
+from cyt_platform.observations import (
+    KIND_WIFI_DEVICE,
+    SOURCE_KISMET_DEVICES,
+    input_digest,
+    normalize_gps_fix,
+)
 from cyt_platform.push import PushQueue
 from cyt_platform.store import CytStore
 
@@ -54,6 +60,7 @@ def test_push_queue_log_backend(tmp_path: Path):
 
 
 def test_gps_extract_and_cotravel(tmp_path: Path):
+    """Co-travel requires co-presence with the operator's own path (D5)."""
     store = CytStore.open({"path": str(tmp_path / "cyt.db"), "mode": "durable"})
     store.begin_session()
     fusion = LiveGpsFusion(
@@ -69,14 +76,83 @@ def test_gps_extract_and_cotravel(tmp_path: Path):
     )
     now = time.time()
     with store.transaction():
-        store.record_location_sighting(
-            "wifi_mac", "AA:00:00:00:00:01", cluster_id(33.4, -112.0), 33.4, -112.0, now - 2000
-        )
-        store.record_location_sighting(
-            "wifi_mac", "AA:00:00:00:00:01", cluster_id(33.5, -112.1), 33.5, -112.1, now
-        )
+        # Operator path: two distinct places ~14 km apart.
+        for lat, lon, ts in [
+            (33.4, -112.0, now - 2000),
+            (33.4, -112.0, now - 1900),
+            (33.5, -112.1, now - 300),
+            (33.5, -112.1, now - 200),
+        ]:
+            rec = normalize_gps_fix(lat=lat, lon=lon, ts=ts, cycle_id=1)
+            store.record_observation(**rec)
+        # Follower co-present at both operator places.
+        for lat, lon, ts in [
+            (33.4, -112.0, now - 1950),
+            (33.5, -112.1, now - 250),
+        ]:
+            store.record_observation(
+                ts=ts,
+                source=SOURCE_KISMET_DEVICES,
+                kind=KIND_WIFI_DEVICE,
+                identity_key="AA:00:00:00:00:01",
+                cycle_id=1,
+                source_ref=f"test:{ts}",
+                input_digest=input_digest({"m": lat, "ts": ts}),
+                lat=lat,
+                lon=lon,
+            )
         results = fusion.score_cotravel(now)
-    assert any(r["location_count"] >= 2 for r in results)
+    follower = [r for r in results if r["entity_key"] == "AA:00:00:00:00:01"]
+    assert follower and follower[0]["location_count"] >= 2
+    store.close()
+
+
+def test_offpath_device_does_not_cotravel(tmp_path: Path):
+    """The audit's docstring-lie fix: two cells anywhere is not co-travel.
+
+    The old implementation scored any device seen at two grid cells with
+    no operator join at all. A device at places the operator never
+    visited must not co-travel, no matter how many cells it spans.
+    """
+    store = CytStore.open({"path": str(tmp_path / "cyt.db"), "mode": "durable"})
+    store.begin_session()
+    fusion = LiveGpsFusion(
+        store,
+        {
+            "gps_fusion": {
+                "enabled": True,
+                "min_locations_for_cotravel": 2,
+                "min_span_seconds": 1,
+                "incident_score_threshold": 0.9,
+            }
+        },
+    )
+    now = time.time()
+    with store.transaction():
+        # Operator path exists (two places), but the device is elsewhere.
+        for lat, lon, ts in [
+            (33.4, -112.0, now - 2000),
+            (33.5, -112.1, now - 300),
+        ]:
+            rec = normalize_gps_fix(lat=lat, lon=lon, ts=ts, cycle_id=1)
+            store.record_observation(**rec)
+        for lat, lon, ts in [
+            (33.8, -112.5, now - 1500),
+            (33.9, -112.6, now - 500),
+        ]:
+            store.record_observation(
+                ts=ts,
+                source=SOURCE_KISMET_DEVICES,
+                kind=KIND_WIFI_DEVICE,
+                identity_key="AA:00:00:00:00:02",
+                cycle_id=1,
+                source_ref=f"test:{ts}",
+                input_digest=input_digest({"m": lat, "ts": ts}),
+                lat=lat,
+                lon=lon,
+            )
+        results = fusion.score_cotravel(now)
+    assert results == []
     store.close()
 
 
