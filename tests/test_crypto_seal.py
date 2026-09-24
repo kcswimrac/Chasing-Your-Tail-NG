@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import os
 import time
 from pathlib import Path
 
-import pytest
 
 from cyt_platform.crypto import StoreKey, generate_key_file, seal_file, unseal_file
 from cyt_platform.store import CytStore

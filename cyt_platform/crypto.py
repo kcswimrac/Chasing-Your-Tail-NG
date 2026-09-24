@@ -15,14 +15,12 @@ Key unlock (first match wins):
 from __future__ import annotations
 
 import base64
-import json
 import logging
 import os
 import secrets
-import struct
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Union
+from typing import Optional
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC

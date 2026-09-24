@@ -14,7 +14,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7.0.0"]
+dev = ["pytest>=7.0.0", "ruff>=0.4.0"]
 
 [project.scripts]
 cyt-analyzer = "cyt_platform.__main__:main"
@@ -25,3 +25,18 @@ include = ["cyt_platform*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+
+[tool.ruff]
+# Lint gate is scoped to the platform package and its tests. Legacy root-level
+# tools are quarantined later in the trustworthiness build and are deliberately
+# out of the gate until then.
+include = ["cyt_platform/**/*.py", "tests/**/*.py"]
+# Python 3.9 is the supported floor (requires-python); pin it so ruff never
+# suggests 3.10+ syntax on hot paths.
+target-version = "py39"
+
+[tool.ruff.lint]
+# Pin ruff's documented default rule set (pycodestyle errors + pyflakes)
+# explicitly so CI is deterministic across ruff releases; broader categories
+# (pyupgrade, flake8-*, etc.) are opt-in later, not ruff-default drift.
+select = ["E4", "E7", "E9", "F"]

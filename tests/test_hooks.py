@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from secure_main_logic import MatchEvent, SecureCYTMonitor
+from secure_main_logic import SecureCYTMonitor
 
 
 class _Sink:

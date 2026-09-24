@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import time
 import urllib.error
 import urllib.request
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 

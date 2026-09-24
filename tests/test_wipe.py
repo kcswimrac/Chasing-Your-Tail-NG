@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from cyt_platform.wipe import panic_wipe, wipe_inventory
+from cyt_platform.wipe import panic_wipe
 
 
 def test_wipe_requires_confirm(tmp_path: Path):

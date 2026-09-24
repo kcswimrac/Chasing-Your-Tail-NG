@@ -11,7 +11,7 @@ import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Generator, List, Optional
+from typing import Dict, Generator, List, Optional
 
 from cyt_platform.crypto import (
     CryptoError,
