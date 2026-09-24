@@ -22,6 +22,7 @@ from cyt_platform.location import (
     DEFAULT_MERGE_RADIUS_M,
     Sighting,
     Visit,
+    attendance,
     cluster_sightings,
     cotravel_matches,
     haversine_m,
@@ -287,6 +288,36 @@ def test_on_path_device_matches_operator_visits():
     assert len(matches) == 2
 
 
+# --- density context (D5) ---------------------------------------------------
+
+
+def test_attendance_counts_distinct_bystanders():
+    """Density = distinct identities near a place in the time window.
+
+    Same-device repeats count once, far and out-of-window sightings don't
+    count, and the subject/operator are excluded (they are the signal).
+    """
+    bystanders = [
+        Sighting(ts=100.0, lat=PHOENIX_LAT, lon=PHOENIX_LON, identity_key="aa:03"),
+        Sighting(ts=150.0, lat=PHOENIX_LAT, lon=PHOENIX_LON, identity_key="aa:03"),
+        Sighting(ts=120.0, lat=PHOENIX_LAT + 0.0001, lon=PHOENIX_LON, identity_key="aa:04"),
+        Sighting(ts=120.0, lat=FAR_LAT, lon=PHOENIX_LON, identity_key="aa:05"),
+        Sighting(ts=1000.0, lat=PHOENIX_LAT, lon=PHOENIX_LON, identity_key="aa:06"),
+        Sighting(ts=110.0, lat=PHOENIX_LAT, lon=PHOENIX_LON, identity_key="aa:07"),
+    ]
+    assert (
+        attendance(
+            bystanders,
+            lat=PHOENIX_LAT,
+            lon=PHOENIX_LON,
+            from_ts=50.0,
+            to_ts=200.0,
+            exclude=("aa:07", "operator"),
+        )
+        == 2
+    )
+
+
 # --- replay scenarios (D5 acceptance: scenario asserts visit counts) ------
 
 SCENARIO_DIR = Path(__file__).resolve().parent.parent / "scenarios" / "location"
@@ -373,6 +404,14 @@ def test_replay_scenario_commuter_visit_counts(tmp_path: Path):
     assert follower is not None
     assert follower["location_count"] == scenario["expect"]["follower_locations"]
     assert "AA:00:00:00:00:02" not in by_key  # off-path device never co-travels
+
+    # Density context: the cafe had two bystander devices; quiet places 0.
+    op_visits = follower["detail"]["operator_visits"]
+    cafe = [v for v in op_visits if abs(v["lat"] - 33.4180) < 0.001]
+    quiet = [v for v in op_visits if abs(v["lat"] - 33.4180) >= 0.001]
+    assert len(cafe) == 1
+    assert cafe[0]["density"] == scenario["expect"]["follower_cafe_density"]
+    assert all(v["density"] == 0 for v in quiet)
 
     # Synthetic clock is in the past relative to the wall clock, so the
     # incident hold window must span the difference.

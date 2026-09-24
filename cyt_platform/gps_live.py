@@ -18,10 +18,12 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 from cyt_platform.location import (
+    DEFAULT_DENSITY_WINDOW_S,
     DEFAULT_MERGE_RADIUS_M,
     DEFAULT_MAX_SPEED_MPS,
     DEFAULT_REVISIT_GAP_S,
     Sighting,
+    attendance,
     cotravel_matches,
     haversine_m,
     independent_visits,
@@ -157,6 +159,9 @@ class LiveGpsFusion:
         )
         self.max_speed_mps = float(
             self.cfg.get("max_speed_mps") or DEFAULT_MAX_SPEED_MPS
+        )
+        self.density_window_s = float(
+            self.cfg.get("density_window_s") or DEFAULT_DENSITY_WINDOW_S
         )
         self.last_fix: Optional[GpsFix] = None
         self.operator_path: List[_ClusterAnchor] = []
@@ -364,6 +369,11 @@ class LiveGpsFusion:
             by_identity.setdefault(key, []).append(_sighting_from_row(row, key))
 
         results: List[dict] = []
+        # Density context: all located device sightings, so bystander
+        # counts around each operator visit can be recorded per visit.
+        all_device_sightings = [
+            s for group in by_identity.values() for s in group
+        ]
         for key in sorted(by_identity):
             sightings = by_identity[key]
             entity_visits = independent_visits(
@@ -409,6 +419,23 @@ class LiveGpsFusion:
                         "lat": round(ov.lat, 6),
                         "lon": round(ov.lon, 6),
                         "cluster_id": ov.cluster_id,
+                        # Density context: distinct other devices near this
+                        # operator visit (subject + operator excluded), so
+                        # the confidence model can discount crowded sites.
+                        "density": attendance(
+                            all_device_sightings,
+                            lat=ov.lat,
+                            lon=ov.lon,
+                            from_ts=ov.enter_ts - self.density_window_s,
+                            to_ts=(
+                                ov.exit_ts
+                                if ov.exit_ts is not None
+                                else ov.enter_ts
+                            )
+                            + self.density_window_s,
+                            radius_m=self.merge_radius_m,
+                            exclude=(key, obs.OPERATOR_IDENTITY),
+                        ),
                     }
                     for _, ov in sorted(matches, key=lambda m: m[1].enter_ts)
                 ],

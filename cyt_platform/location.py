@@ -289,6 +289,10 @@ def visits_overlap(
 # each of the shared place (leaders may differ between observers).
 COTRAVEL_ANCHOR_RADIUS_FACTOR = 2.0
 
+# Density context window: attendance is counted for sightings within this
+# many seconds of a visit's window.
+DEFAULT_DENSITY_WINDOW_S = 300.0
+
 
 def cotravel_matches(
     entity_visits: Sequence[Visit],
@@ -313,3 +317,32 @@ def cotravel_matches(
             ):
                 matches.append((ev, ov))
     return matches
+
+
+def attendance(
+    sightings: Sequence[Sighting],
+    *,
+    lat: float,
+    lon: float,
+    from_ts: float,
+    to_ts: float,
+    radius_m: float = DEFAULT_MERGE_RADIUS_M,
+    exclude: Sequence[str] = (),
+) -> int:
+    """Count distinct OTHER identities observed near a place in a window.
+
+    Density context for the confidence model: how crowded the place was
+    around a visit, so crowded sites can be discounted. Only distinct
+    identity keys count (one device pinging repeatedly is one bystander);
+    the visiting subject and the operator are excluded via ``exclude`` —
+    they are the signal, not the crowd.
+    """
+    others: set = set()
+    for s in sightings:
+        if s.identity_key in exclude or s.identity_key is None:
+            continue
+        if s.ts < from_ts or s.ts > to_ts:
+            continue
+        if haversine_m(lat, lon, s.lat, s.lon) <= radius_m:
+            others.add(s.identity_key)
+    return len(others)

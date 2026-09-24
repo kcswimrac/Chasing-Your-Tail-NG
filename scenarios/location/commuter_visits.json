@@ -6,7 +6,8 @@
     "detect": true,
     "operator_visit_count": 4,
     "follower_locations": 4,
-    "offpath_detected": false
+    "offpath_detected": false,
+    "follower_cafe_density": 2
   },
   "sightings": [
     {
@@ -297,6 +298,24 @@
       "lat": 33.55,
       "lon": -112.2,
       "ts": 1758737000
+    },
+    {
+      "identity": "AA:00:00:00:00:03",
+      "lat": 33.418,
+      "lon": -111.995,
+      "ts": 1758734600
+    },
+    {
+      "identity": "AA:00:00:00:00:03",
+      "lat": 33.418,
+      "lon": -111.995,
+      "ts": 1758735200
+    },
+    {
+      "identity": "AA:00:00:00:00:04",
+      "lat": 33.418,
+      "lon": -111.995,
+      "ts": 1758735400
     }
   ]
 }
