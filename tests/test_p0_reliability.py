@@ -289,7 +289,7 @@ def disabled_rf_config():
 class BoomDetector:
     last_scan_error = None
 
-    def scan_kismet_db(self, db_path):
+    def scan_kismet_db(self, db_path, now=None):
         raise RuntimeError("boom")
 
     def analyze_attacks(self):
@@ -301,7 +301,7 @@ class SwallowingDetector:
 
     last_scan_error = "kismet_db_error: database disk image is malformed"
 
-    def scan_kismet_db(self, db_path):
+    def scan_kismet_db(self, db_path, now=None):
         return []
 
     def analyze_attacks(self):
@@ -311,7 +311,7 @@ class SwallowingDetector:
 class HealthyDetector:
     last_scan_error = None
 
-    def scan_kismet_db(self, db_path):
+    def scan_kismet_db(self, db_path, now=None):
         return []
 
     def analyze_attacks(self):

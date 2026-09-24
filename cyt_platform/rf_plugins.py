@@ -122,9 +122,15 @@ class RFPluginRunner:
         return dict(self._failures)
 
     def run_cycle(
-        self, kdb: Any, db_path: str, recent_window_s: float = 120.0
+        self,
+        kdb: Any,
+        db_path: str,
+        recent_window_s: float = 120.0,
+        now: Optional[float] = None,
     ) -> Dict[str, Any]:
-        now = time.time()
+        # Injected clock (replay, locked decision 4): the wall clock is read
+        # only when the host does not supply a scenario time.
+        now = time.time() if now is None else float(now)
         stats: Dict[str, Any] = {
             "deauth_events": 0,
             "rogue_alerts": 0,
@@ -171,7 +177,7 @@ class RFPluginRunner:
         # Deauth / rogue — use file path APIs from CM5 modules
         if self.deauth:
             try:
-                events = self.deauth.scan_kismet_db(db_path)
+                events = self.deauth.scan_kismet_db(db_path, now=now)
                 stats["deauth_events"] = len(events or [])
                 attacks = []
                 if hasattr(self.deauth, "analyze_attacks"):
@@ -195,7 +201,7 @@ class RFPluginRunner:
         if self.rogue:
             try:
                 if hasattr(self.rogue, "scan_kismet_db"):
-                    alerts = self.rogue.scan_kismet_db(db_path)
+                    alerts = self.rogue.scan_kismet_db(db_path, now=now)
                 else:
                     alerts = []
                 stats["rogue_alerts"] = len(alerts or [])
