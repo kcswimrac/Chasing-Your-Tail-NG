@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 
 import migrate_credentials
-from secure_credentials import SecureCredentialManager
+from cyt_platform.secure_credentials import SecureCredentialManager
 
 SECRET_TOKEN = "SECRET_WIGLE_TOKEN_AAA111"
 

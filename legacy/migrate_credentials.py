@@ -7,7 +7,13 @@ import json
 import sys
 import os
 from pathlib import Path
-from secure_credentials import SecureCredentialManager
+
+# Legacy quarantine: shared security modules are canonical now and live in
+# cyt_platform/. Bootstrap the repo root so this script still runs from a
+# source checkout without installation.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from cyt_platform.secure_credentials import SecureCredentialManager
 
 def main():
     print("🔐 CYT Credential Migration Tool")

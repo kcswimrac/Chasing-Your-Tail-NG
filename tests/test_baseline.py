@@ -8,7 +8,7 @@ from pathlib import Path
 from cyt_platform.baseline import BaselineEngine
 from cyt_platform.incidents import IncidentDeduper
 from cyt_platform.store import CytStore
-from secure_main_logic import MatchEvent
+from cyt_platform.secure_main_logic import MatchEvent
 
 
 def test_learn_and_suppress(tmp_path: Path):

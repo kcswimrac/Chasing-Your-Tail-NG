@@ -8,13 +8,20 @@ import glob
 import json
 import logging
 import os
+import sys
 import time
 from datetime import datetime
 from pathlib import Path
 
-from surveillance_detector import SurveillanceDetector, load_appearances_from_kismet
+# Legacy quarantine: shared security modules are canonical now and live in
+# cyt_platform/. Bootstrap the repo root so this script still runs from a
+# source checkout without installation.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from cyt_platform.secure_credentials import secure_config_loader
+
 from gps_tracker import GPSTracker, KMLExporter, simulate_gps_data
-from secure_credentials import secure_config_loader
+from surveillance_detector import SurveillanceDetector, load_appearances_from_kismet
 
 # Configure logging
 logging.basicConfig(

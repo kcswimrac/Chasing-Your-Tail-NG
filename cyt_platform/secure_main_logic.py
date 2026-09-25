@@ -5,7 +5,7 @@ import logging
 import time
 from dataclasses import dataclass
 from typing import Callable, List, Dict, Optional, Set
-from secure_database import SecureKismetDB, SecureTimeWindows
+from cyt_platform.secure_database import SecureKismetDB, SecureTimeWindows
 
 logger = logging.getLogger(__name__)
 

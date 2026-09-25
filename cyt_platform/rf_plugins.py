@@ -173,7 +173,7 @@ class RFPluginRunner:
         rf = self.config.get("rf") or {}
         if rf.get("deauth_enabled", True):
             try:
-                from deauth_detector import DeauthDetector
+                from cyt_platform.deauth_detector import DeauthDetector
 
                 self.deauth = DeauthDetector(
                     self.config,
@@ -191,7 +191,7 @@ class RFPluginRunner:
                 )
         if rf.get("rogue_enabled", True):
             try:
-                from rogue_ap_detector import RogueAPDetector
+                from cyt_platform.rogue_ap_detector import RogueAPDetector
 
                 self.rogue = RogueAPDetector(
                     self.config,

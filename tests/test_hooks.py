@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from secure_main_logic import SecureCYTMonitor
+from cyt_platform.secure_main_logic import SecureCYTMonitor
 
 
 class _Sink:

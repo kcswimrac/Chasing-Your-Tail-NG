@@ -64,11 +64,11 @@ def main():
     print("🎯 Running surveillance analysis with demo data...")
     
     # Check if we can run demo
-    if os.path.exists("surveillance_analyzer.py"):
-        run_command("python3 surveillance_analyzer.py --demo", 
+    if os.path.exists("legacy/surveillance_analyzer.py"):
+        run_command("python3 legacy/surveillance_analyzer.py --demo", 
                    "Executing surveillance detection with simulated GPS route")
     else:
-        print("⚠️ surveillance_analyzer.py not found - ensure you're in the correct directory")
+        print("⚠️ legacy/surveillance_analyzer.py not found - ensure you're in the correct directory")
     
     print_step(4, "Output Files Generated")
     

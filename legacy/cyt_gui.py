@@ -522,7 +522,7 @@ class CYTGui:
             env = os.environ.copy()
             
             process = subprocess.Popen(
-                ['python3', './chasing_your_tail.py'],
+                ['python3', './legacy/chasing_your_tail.py'],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
@@ -560,7 +560,7 @@ class CYTGui:
             self.log_message("🔄 Running probe analyzer (this may take several minutes for large datasets)...")
             
             result = subprocess.run(
-                ['python3', './probe_analyzer.py', '--local'],
+                ['python3', './legacy/probe_analyzer.py', '--local'],
                 capture_output=True,
                 text=True,
                 timeout=300,  # Increased to 5 minutes
@@ -650,7 +650,7 @@ class CYTGui:
             self.log_message("🔄 Running surveillance analyzer (generating KML for Google Earth)...")
             
             result = subprocess.run(
-                ['python3', './surveillance_analyzer.py'],
+                ['python3', './legacy/surveillance_analyzer.py'],
                 capture_output=True,
                 text=True,
                 timeout=300,

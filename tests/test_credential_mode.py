@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from secure_credentials import SecureCredentialManager
+from cyt_platform.secure_credentials import SecureCredentialManager
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 TEST_MODE_KEY = "CYT_TEST_MODE"
@@ -54,8 +54,9 @@ class TestDefaultPathNeverEnablesTestMode:
     def test_no_code_path_writes_test_mode_env(self):
         # These two modules historically wrote os.environ['CYT_TEST_MODE']
         # at import/init time; the AST guard blocks any such write returning.
+        # Both are quarantined under legacy/ — the guard follows them there.
         for name in ("cyt_gui.py", "surveillance_analyzer.py"):
-            source = (REPO_ROOT / name).read_text()
+            source = (REPO_ROOT / "legacy" / name).read_text()
             writes = _test_mode_env_writes(source)
             assert not writes, (
                 f"{name} writes the {TEST_MODE_KEY} env var at lines {writes} "
@@ -64,7 +65,9 @@ class TestDefaultPathNeverEnablesTestMode:
 
     def test_import_and_analyzer_init_leave_default_env_clean(self, tmp_path):
         env = {k: v for k, v in os.environ.items() if not k.startswith("CYT_")}
-        env["PYTHONPATH"] = str(REPO_ROOT)
+        # Legacy/ hosts the quarantined tools; repo root hosts cyt_platform —
+        # the probe imports both sides by their historical top-level names.
+        env["PYTHONPATH"] = os.pathsep.join([str(REPO_ROOT), str(REPO_ROOT / "legacy")])
         probe = (
             "import os\n"
             "import surveillance_analyzer\n"
