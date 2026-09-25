@@ -1,0 +1,282 @@
+{
+  "scenario_version": 1,
+  "scenario_id": "conference-hall-density",
+  "description": "Conference hall: a dozen ambient devices across cycles. Crowding is context for the confidence model, never an alert on its own.",
+  "session_id": "replay-conference-hall-density",
+  "labels": {
+    "kind": "normal",
+    "expect": {
+      "detect": false,
+      "state": "clear"
+    }
+  },
+  "cycles": [
+    {
+      "cycle_id": 1,
+      "clock_ts": 1700000000.0,
+      "rows": [
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "AA:BB:CC:DD:00:01",
+            "type": "Wi-Fi Client",
+            "last_time": 1699999995.0,
+            "device": {
+              "kismet.device.base.signal": {
+                "kismet.common.signal.last_signal": -60
+              },
+              "kismet.device.base.channel": "6"
+            }
+          }
+        },
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "AA:BB:CC:DD:01:02",
+            "type": "Wi-Fi Client",
+            "last_time": 1699999994.0,
+            "device": {
+              "kismet.device.base.signal": {
+                "kismet.common.signal.last_signal": -60
+              },
+              "kismet.device.base.channel": "6"
+            }
+          }
+        },
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "AA:BB:CC:DD:02:03",
+            "type": "Wi-Fi Client",
+            "last_time": 1699999993.0,
+            "device": {
+              "kismet.device.base.signal": {
+                "kismet.common.signal.last_signal": -60
+              },
+              "kismet.device.base.channel": "6"
+            }
+          }
+        },
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "AA:BB:CC:DD:03:04",
+            "type": "Wi-Fi Client",
+            "last_time": 1699999992.0,
+            "device": {
+              "kismet.device.base.signal": {
+                "kismet.common.signal.last_signal": -60
+              },
+              "kismet.device.base.channel": "6"
+            }
+          }
+        },
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "BB:BB:CC:03:00:01",
+            "type": "Wi-Fi AP",
+            "last_time": 1699999997.0,
+            "device": {
+              "dot11.device": {
+                "dot11.device.advertised_ssid_map": [
+                  {
+                    "dot11.advertisedssid.ssid": "ConfWiFi",
+                    "dot11.advertisedssid.crypt_string": "WPA2-ENT"
+                  }
+                ]
+              },
+              "kismet.device.base.channel": "6"
+            }
+          }
+        },
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "BB:BB:CC:03:00:02",
+            "type": "Wi-Fi AP",
+            "last_time": 1699999996.0,
+            "device": {
+              "dot11.device": {
+                "dot11.device.advertised_ssid_map": [
+                  {
+                    "dot11.advertisedssid.ssid": "ConfWiFi-Lobby",
+                    "dot11.advertisedssid.crypt_string": "WPA2-ENT"
+                  }
+                ]
+              },
+              "kismet.device.base.channel": "11"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "cycle_id": 2,
+      "clock_ts": 1700000030.0,
+      "rows": [
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "AA:BB:CC:DD:04:05",
+            "type": "Wi-Fi Client",
+            "last_time": 1700000026.0,
+            "device": {
+              "kismet.device.base.signal": {
+                "kismet.common.signal.last_signal": -60
+              },
+              "kismet.device.base.channel": "6"
+            }
+          }
+        },
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "AA:BB:CC:DD:05:06",
+            "type": "Wi-Fi Client",
+            "last_time": 1700000025.0,
+            "device": {
+              "kismet.device.base.signal": {
+                "kismet.common.signal.last_signal": -60
+              },
+              "kismet.device.base.channel": "6"
+            }
+          }
+        },
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "AA:BB:CC:DD:06:07",
+            "type": "Wi-Fi Client",
+            "last_time": 1700000024.0,
+            "device": {
+              "kismet.device.base.signal": {
+                "kismet.common.signal.last_signal": -60
+              },
+              "kismet.device.base.channel": "6"
+            }
+          }
+        },
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "AA:BB:CC:DD:07:08",
+            "type": "Wi-Fi Client",
+            "last_time": 1700000023.0,
+            "device": {
+              "kismet.device.base.signal": {
+                "kismet.common.signal.last_signal": -60
+              },
+              "kismet.device.base.channel": "6"
+            }
+          }
+        },
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "BB:BB:CC:03:00:03",
+            "type": "Wi-Fi AP",
+            "last_time": 1700000027.0,
+            "device": {
+              "dot11.device": {
+                "dot11.device.advertised_ssid_map": [
+                  {
+                    "dot11.advertisedssid.ssid": "VendorBooth",
+                    "dot11.advertisedssid.crypt_string": "WPA2-PSK"
+                  }
+                ]
+              },
+              "kismet.device.base.channel": "1"
+            }
+          }
+        },
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "BB:BB:CC:03:00:04",
+            "type": "Wi-Fi AP",
+            "last_time": 1700000026.0,
+            "device": {
+              "dot11.device": {
+                "dot11.device.advertised_ssid_map": [
+                  {
+                    "dot11.advertisedssid.ssid": "AP-4F",
+                    "dot11.advertisedssid.crypt_string": "Open"
+                  }
+                ]
+              },
+              "kismet.device.base.channel": "3"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "cycle_id": 3,
+      "clock_ts": 1700000060.0,
+      "rows": [
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "AA:BB:CC:DD:00:01",
+            "type": "Wi-Fi Client",
+            "last_time": 1700000055.0,
+            "device": {
+              "kismet.device.base.signal": {
+                "kismet.common.signal.last_signal": -60
+              },
+              "kismet.device.base.channel": "6"
+            }
+          }
+        },
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "AA:BB:CC:DD:01:02",
+            "type": "Wi-Fi Client",
+            "last_time": 1700000054.0,
+            "device": {
+              "kismet.device.base.signal": {
+                "kismet.common.signal.last_signal": -60
+              },
+              "kismet.device.base.channel": "6"
+            }
+          }
+        },
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "AA:BB:CC:DD:02:03",
+            "type": "Wi-Fi Client",
+            "last_time": 1700000053.0,
+            "device": {
+              "kismet.device.base.signal": {
+                "kismet.common.signal.last_signal": -60
+              },
+              "kismet.device.base.channel": "6"
+            }
+          }
+        },
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "AA:BB:CC:DD:03:04",
+            "type": "Wi-Fi Client",
+            "last_time": 1700000052.0,
+            "device": {
+              "kismet.device.base.signal": {
+                "kismet.common.signal.last_signal": -60
+              },
+              "kismet.device.base.channel": "6"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "cycle_id": 4,
+      "clock_ts": 1700000090.0,
+      "rows": []
+    }
+  ]
+}

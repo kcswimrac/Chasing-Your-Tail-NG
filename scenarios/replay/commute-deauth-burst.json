@@ -7,7 +7,12 @@
     "kind": "suspicious",
     "expect": {
       "detect": true,
-      "state": "watch"
+      "state": "watch",
+      "max_latency_cycles": 1,
+      "entity_keys": [
+        "AA:BB:CC:DD:EE:02"
+      ],
+      "max_incidents": 1
     }
   },
   "config_overrides": {
@@ -15,7 +20,9 @@
       "min_events_for_attack": 2
     }
   },
-  "restarts": [3],
+  "restarts": [
+    3
+  ],
   "cycles": [
     {
       "cycle_id": 1,
@@ -57,8 +64,16 @@
         }
       ]
     },
-    { "cycle_id": 2, "clock_ts": 1700000015.0, "rows": [] },
-    { "cycle_id": 3, "clock_ts": 1700000030.0, "rows": [] },
+    {
+      "cycle_id": 2,
+      "clock_ts": 1700000015.0,
+      "rows": []
+    },
+    {
+      "cycle_id": 3,
+      "clock_ts": 1700000030.0,
+      "rows": []
+    },
     {
       "cycle_id": 4,
       "clock_ts": 1700000045.0,
@@ -81,7 +96,15 @@
         }
       ]
     },
-    { "cycle_id": 5, "clock_ts": 1700000060.0, "rows": [] },
-    { "cycle_id": 6, "clock_ts": 1700000075.0, "rows": [] }
+    {
+      "cycle_id": 5,
+      "clock_ts": 1700000060.0,
+      "rows": []
+    },
+    {
+      "cycle_id": 6,
+      "clock_ts": 1700000075.0,
+      "rows": []
+    }
   ]
 }

@@ -1,0 +1,100 @@
+{
+  "scenario_version": 1,
+  "scenario_id": "ble-tracker-reappears",
+  "description": "A Tile-style tracker is present, drops out long enough for staleness to close the incident, then reappears. The same subject must re-open its incident, not vanish.",
+  "session_id": "replay-ble-tracker-reappears",
+  "labels": {
+    "kind": "suspicious",
+    "expect": {
+      "detect": true,
+      "state": "alert",
+      "max_latency_cycles": 1,
+      "entity_keys": [
+        "DD:DD:DD:DD:DD:03"
+      ],
+      "max_incidents": 1
+    }
+  },
+  "config_overrides": {
+    "ble_tracker": {
+      "enabled": true
+    }
+  },
+  "close_after_seconds": 60.0,
+  "cycles": [
+    {
+      "cycle_id": 1,
+      "clock_ts": 1700000000.0,
+      "rows": [
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "DD:DD:DD:DD:DD:03",
+            "type": "BTLE Device",
+            "last_time": 1699999995.0,
+            "device": {
+              "kismet.device.base.type": "BTLE Device",
+              "kismet.device.base.commonname": "Tile Tracker"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "cycle_id": 2,
+      "clock_ts": 1700000030.0,
+      "rows": [
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "DD:DD:DD:DD:DD:03",
+            "type": "BTLE Device",
+            "last_time": 1699999995.0,
+            "device": {
+              "kismet.device.base.type": "BTLE Device",
+              "kismet.device.base.commonname": "Tile Tracker"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "cycle_id": 3,
+      "clock_ts": 1700000060.0,
+      "rows": []
+    },
+    {
+      "cycle_id": 4,
+      "clock_ts": 1700000090.0,
+      "rows": []
+    },
+    {
+      "cycle_id": 5,
+      "clock_ts": 1700000120.0,
+      "rows": []
+    },
+    {
+      "cycle_id": 6,
+      "clock_ts": 1700000150.0,
+      "rows": [
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "DD:DD:DD:DD:DD:03",
+            "type": "BTLE Device",
+            "last_time": 1700000145.0,
+            "device": {
+              "kismet.device.base.type": "BTLE Device",
+              "kismet.device.base.commonname": "Tile Tracker"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "cycle_id": 7,
+      "clock_ts": 1700000180.0,
+      "rows": []
+    }
+  ]
+}

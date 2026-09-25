@@ -1,0 +1,192 @@
+{
+  "scenario_version": 1,
+  "scenario_id": "cooperating-followers-deauth",
+  "description": "Two devices travel with the operator across two stops while one of them is also hit by a deauthentication burst: independent evidence classes must all file (three cotravel subjects plus the deauth attack on the hit device), never collapse to one.",
+  "session_id": "replay-cooperating-followers-deauth",
+  "labels": {
+    "kind": "suspicious",
+    "expect": {
+      "detect": true,
+      "state": "watch",
+      "max_latency_cycles": 1,
+      "entity_keys": [
+        "AA:BB:CC:00:00:01",
+        "AA:BB:CC:00:00:51",
+        "AA:BB:CC:00:00:52"
+      ],
+      "max_incidents": 4
+    }
+  },
+  "config_overrides": {
+    "gps_fusion": {
+      "enabled": true,
+      "min_locations_for_cotravel": 2,
+      "min_span_seconds": 1,
+      "incident_score_threshold": 0.2
+    },
+    "deauth_detection": {
+      "min_events_for_attack": 2
+    }
+  },
+  "cycles": [
+    {
+      "cycle_id": 1,
+      "clock_ts": 1700000000.0,
+      "rows": [
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "AA:BB:CC:00:00:01",
+            "type": "Wi-Fi Client",
+            "last_time": 1699999990.0,
+            "device": {
+              "kismet.device.base.type": "Wi-Fi Client",
+              "kismet.device.base.location": {
+                "kismet.common.location.geopoint": [
+                  -112.0,
+                  33.4
+                ],
+                "kismet.common.location.time_sec": 1699999990.0
+              }
+            }
+          }
+        },
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "AA:BB:CC:00:00:51",
+            "type": "Wi-Fi Client",
+            "last_time": 1699999990.0,
+            "device": {
+              "kismet.device.base.type": "Wi-Fi Client",
+              "kismet.device.base.location": {
+                "kismet.common.location.geopoint": [
+                  -112.0,
+                  33.4
+                ],
+                "kismet.common.location.time_sec": 1699999990.0
+              }
+            }
+          }
+        },
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "AA:BB:CC:00:00:52",
+            "type": "Wi-Fi Client",
+            "last_time": 1699999990.0,
+            "device": {
+              "kismet.device.base.type": "Wi-Fi Client",
+              "kismet.device.base.location": {
+                "kismet.common.location.geopoint": [
+                  -112.0,
+                  33.4
+                ],
+                "kismet.common.location.time_sec": 1699999990.0
+              }
+            }
+          }
+        },
+        {
+          "source": "kismet.alerts",
+          "row": {
+            "ts_sec": 1699999991.0,
+            "header": "DEAUTH",
+            "json": {
+              "kismet.alert.header": "DEAUTH",
+              "kismet.alert.text": "Detected deauthentication attack",
+              "kismet.alert.source_mac": "AA:BB:CC:0D:00:11",
+              "kismet.alert.dest_mac": "AA:BB:CC:00:00:51",
+              "kismet.alert.channel": 6
+            },
+            "src_mac": "AA:BB:CC:0D:00:11",
+            "dst_mac": "AA:BB:CC:00:00:51",
+            "bssid": ""
+          }
+        },
+        {
+          "source": "kismet.alerts",
+          "row": {
+            "ts_sec": 1699999994.0,
+            "header": "DEAUTH",
+            "json": {
+              "kismet.alert.header": "DEAUTH",
+              "kismet.alert.text": "Detected deauthentication attack",
+              "kismet.alert.source_mac": "AA:BB:CC:0D:00:11",
+              "kismet.alert.dest_mac": "AA:BB:CC:00:00:51",
+              "kismet.alert.channel": 6
+            },
+            "src_mac": "AA:BB:CC:0D:00:11",
+            "dst_mac": "AA:BB:CC:00:00:51",
+            "bssid": ""
+          }
+        }
+      ]
+    },
+    {
+      "cycle_id": 2,
+      "clock_ts": 1700000060.0,
+      "rows": [
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "AA:BB:CC:00:00:01",
+            "type": "Wi-Fi Client",
+            "last_time": 1700000050.0,
+            "device": {
+              "kismet.device.base.type": "Wi-Fi Client",
+              "kismet.device.base.location": {
+                "kismet.common.location.geopoint": [
+                  -112.01,
+                  33.41
+                ],
+                "kismet.common.location.time_sec": 1700000050.0
+              }
+            }
+          }
+        },
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "AA:BB:CC:00:00:51",
+            "type": "Wi-Fi Client",
+            "last_time": 1700000050.0,
+            "device": {
+              "kismet.device.base.type": "Wi-Fi Client",
+              "kismet.device.base.location": {
+                "kismet.common.location.geopoint": [
+                  -112.01,
+                  33.41
+                ],
+                "kismet.common.location.time_sec": 1700000050.0
+              }
+            }
+          }
+        },
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "AA:BB:CC:00:00:52",
+            "type": "Wi-Fi Client",
+            "last_time": 1700000050.0,
+            "device": {
+              "kismet.device.base.type": "Wi-Fi Client",
+              "kismet.device.base.location": {
+                "kismet.common.location.geopoint": [
+                  -112.01,
+                  33.41
+                ],
+                "kismet.common.location.time_sec": 1700000050.0
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "cycle_id": 3,
+      "clock_ts": 1700000120.0,
+      "rows": []
+    }
+  ]
+}

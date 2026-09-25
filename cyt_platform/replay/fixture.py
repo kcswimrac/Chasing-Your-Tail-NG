@@ -114,6 +114,50 @@ class KismetFixture:
             ),
         )
 
+    def snapshot_until(self, ts: float) -> Path:
+        """Materialize the capture DB as of ``ts`` (future rows excluded).
+
+        The production detectors read a database path and bound their scans
+        below by the per-detector watermark only — a live Kismet capture can
+        never contain rows from the future, but this fixture is written once
+        up front with every cycle's rows. Handing detectors the full fixture
+        let a scan at cycle N see rows dated after cycle N's clock, breaking
+        cycle-faithful replay (an evil twin appearing in cycle 2 was "detected"
+        in cycle 1). The snapshot contains exactly the rows a live capture
+        would have held at ``ts``: same insertion order, filtered, so
+        detectors need no SQL changes and replay stays honest.
+
+        Returns the snapshot path; content is a pure function of the fixture
+        rows and ``ts``, so determinism and byte-identical reports hold.
+        """
+        snap_path = self.path.parent / "kismet_snapshot.db"
+        if snap_path.exists():
+            snap_path.unlink()
+        snap = sqlite3.connect(str(snap_path))
+        try:
+            snap.execute("ATTACH DATABASE ? AS src", (str(self.path),))
+            snap.executescript(_SCHEMA)
+            snap.execute(
+                """
+                INSERT INTO alerts(ts_sec, header, json, src_mac, dst_mac, bssid)
+                SELECT ts_sec, header, json, src_mac, dst_mac, bssid
+                FROM src.alerts WHERE ts_sec <= ?
+                """,
+                (float(ts),),
+            )
+            snap.execute(
+                """
+                INSERT INTO devices(devmac, type, device, last_time, first_time)
+                SELECT devmac, type, device, last_time, first_time
+                FROM src.devices WHERE last_time <= ?
+                """,
+                (float(ts),),
+            )
+            snap.commit()
+        finally:
+            snap.close()
+        return snap_path
+
     def close(self) -> None:
         try:
             self._conn.close()

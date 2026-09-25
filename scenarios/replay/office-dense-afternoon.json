@@ -1,0 +1,270 @@
+{
+  "scenario_version": 1,
+  "scenario_id": "office-dense-afternoon",
+  "description": "Dense office afternoon: many static clients and APs while the operator moves between two work areas. Unlocated devices can never co-travel; density alone must not alert.",
+  "session_id": "replay-office-dense-afternoon",
+  "labels": {
+    "kind": "normal",
+    "expect": {
+      "detect": false,
+      "state": "clear"
+    }
+  },
+  "config_overrides": {
+    "gps_fusion": {
+      "enabled": true,
+      "min_locations_for_cotravel": 2,
+      "min_span_seconds": 1,
+      "incident_score_threshold": 0.2
+    }
+  },
+  "cycles": [
+    {
+      "cycle_id": 1,
+      "clock_ts": 1700000000.0,
+      "rows": [
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "AA:BB:CC:DD:EE:01",
+            "type": "Wi-Fi Client",
+            "last_time": 1699999995.0,
+            "device": {
+              "kismet.device.base.type": "Wi-Fi Client",
+              "kismet.device.base.location": {
+                "kismet.common.location.geopoint": [
+                  -112.0,
+                  33.4
+                ],
+                "kismet.common.location.time_sec": 1699999995.0
+              }
+            }
+          }
+        },
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "AA:BB:CC:DD:EE:02",
+            "type": "Wi-Fi Client",
+            "last_time": 1699999992.0,
+            "device": {
+              "kismet.device.base.signal": {
+                "kismet.common.signal.last_signal": -60
+              },
+              "kismet.device.base.channel": "6"
+            }
+          }
+        },
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "BB:BB:CC:02:00:01",
+            "type": "Wi-Fi AP",
+            "last_time": 1699999997.0,
+            "device": {
+              "dot11.device": {
+                "dot11.device.advertised_ssid_map": [
+                  {
+                    "dot11.advertisedssid.ssid": "CorpHQ",
+                    "dot11.advertisedssid.crypt_string": "WPA2-ENT"
+                  }
+                ]
+              },
+              "kismet.device.base.channel": "6"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "cycle_id": 2,
+      "clock_ts": 1700000030.0,
+      "rows": [
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "AA:BB:CC:DD:EE:01",
+            "type": "Wi-Fi Client",
+            "last_time": 1700000025.0,
+            "device": {
+              "kismet.device.base.type": "Wi-Fi Client",
+              "kismet.device.base.location": {
+                "kismet.common.location.geopoint": [
+                  -112.0,
+                  33.4
+                ],
+                "kismet.common.location.time_sec": 1700000025.0
+              }
+            }
+          }
+        },
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "AA:BB:CC:DD:EE:03",
+            "type": "Wi-Fi Client",
+            "last_time": 1700000022.0,
+            "device": {
+              "kismet.device.base.signal": {
+                "kismet.common.signal.last_signal": -60
+              },
+              "kismet.device.base.channel": "6"
+            }
+          }
+        },
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "BB:BB:CC:02:00:02",
+            "type": "Wi-Fi AP",
+            "last_time": 1700000027.0,
+            "device": {
+              "dot11.device": {
+                "dot11.device.advertised_ssid_map": [
+                  {
+                    "dot11.advertisedssid.ssid": "CorpHQ-Guest",
+                    "dot11.advertisedssid.crypt_string": "WPA2-PSK"
+                  }
+                ]
+              },
+              "kismet.device.base.channel": "11"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "cycle_id": 3,
+      "clock_ts": 1700000060.0,
+      "rows": [
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "AA:BB:CC:DD:EE:01",
+            "type": "Wi-Fi Client",
+            "last_time": 1700000055.0,
+            "device": {
+              "kismet.device.base.type": "Wi-Fi Client",
+              "kismet.device.base.location": {
+                "kismet.common.location.geopoint": [
+                  -112.01,
+                  33.41
+                ],
+                "kismet.common.location.time_sec": 1700000055.0
+              }
+            }
+          }
+        },
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "AA:BB:CC:DD:EE:02",
+            "type": "Wi-Fi Client",
+            "last_time": 1700000052.0,
+            "device": {
+              "kismet.device.base.signal": {
+                "kismet.common.signal.last_signal": -60
+              },
+              "kismet.device.base.channel": "6"
+            }
+          }
+        },
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "AA:BB:CC:DD:EE:04",
+            "type": "Wi-Fi Client",
+            "last_time": 1700000052.0,
+            "device": {
+              "kismet.device.base.signal": {
+                "kismet.common.signal.last_signal": -60
+              },
+              "kismet.device.base.channel": "6"
+            }
+          }
+        },
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "BB:BB:CC:02:00:01",
+            "type": "Wi-Fi AP",
+            "last_time": 1700000057.0,
+            "device": {
+              "dot11.device": {
+                "dot11.device.advertised_ssid_map": [
+                  {
+                    "dot11.advertisedssid.ssid": "CorpHQ",
+                    "dot11.advertisedssid.crypt_string": "WPA2-ENT"
+                  }
+                ]
+              },
+              "kismet.device.base.channel": "6"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "cycle_id": 4,
+      "clock_ts": 1700000090.0,
+      "rows": [
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "AA:BB:CC:DD:EE:01",
+            "type": "Wi-Fi Client",
+            "last_time": 1700000085.0,
+            "device": {
+              "kismet.device.base.type": "Wi-Fi Client",
+              "kismet.device.base.location": {
+                "kismet.common.location.geopoint": [
+                  -112.01,
+                  33.41
+                ],
+                "kismet.common.location.time_sec": 1700000085.0
+              }
+            }
+          }
+        },
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "AA:BB:CC:DD:EE:03",
+            "type": "Wi-Fi Client",
+            "last_time": 1700000082.0,
+            "device": {
+              "kismet.device.base.signal": {
+                "kismet.common.signal.last_signal": -60
+              },
+              "kismet.device.base.channel": "6"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "cycle_id": 5,
+      "clock_ts": 1700000120.0,
+      "rows": [
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "AA:BB:CC:DD:EE:01",
+            "type": "Wi-Fi Client",
+            "last_time": 1700000115.0,
+            "device": {
+              "kismet.device.base.type": "Wi-Fi Client",
+              "kismet.device.base.location": {
+                "kismet.common.location.geopoint": [
+                  -112.01,
+                  33.41
+                ],
+                "kismet.common.location.time_sec": 1700000115.0
+              }
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

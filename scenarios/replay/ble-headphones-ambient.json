@@ -1,0 +1,73 @@
+{
+  "scenario_version": 1,
+  "scenario_id": "ble-headphones-ambient",
+  "description": "BLE peripherals with ordinary product names around the operator. Sub-threshold BLE devices become entities, never tracker incidents.",
+  "session_id": "replay-ble-headphones-ambient",
+  "labels": {
+    "kind": "normal",
+    "expect": {
+      "detect": false,
+      "state": "clear"
+    }
+  },
+  "config_overrides": {
+    "ble_tracker": {
+      "enabled": true
+    }
+  },
+  "cycles": [
+    {
+      "cycle_id": 1,
+      "clock_ts": 1700000000.0,
+      "rows": [
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "DD:DD:DD:DD:11:01",
+            "type": "BTLE Device",
+            "last_time": 1699999995.0,
+            "device": {
+              "kismet.device.base.type": "BTLE Device",
+              "kismet.device.base.commonname": "Studio Headphones"
+            }
+          }
+        },
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "DD:DD:DD:DD:11:02",
+            "type": "BTLE Device",
+            "last_time": 1699999992.0,
+            "device": {
+              "kismet.device.base.type": "BTLE Device",
+              "kismet.device.base.commonname": "Car Speakerphone"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "cycle_id": 2,
+      "clock_ts": 1700000030.0,
+      "rows": [
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "DD:DD:DD:DD:11:01",
+            "type": "BTLE Device",
+            "last_time": 1700000025.0,
+            "device": {
+              "kismet.device.base.type": "BTLE Device",
+              "kismet.device.base.commonname": "Studio Headphones"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "cycle_id": 3,
+      "clock_ts": 1700000060.0,
+      "rows": []
+    }
+  ]
+}

@@ -1,7 +1,7 @@
 {
   "scenario_version": 1,
   "scenario_id": "detector_failure",
-  "description": "The deauth detector fails every cycle while the air is otherwise quiet — the run must read degraded every cycle, never clear: a dead detector can never read as 'no threat'",
+  "description": "The deauth detector fails every cycle while the air is otherwise quiet \u2014 the run must read degraded every cycle, never clear: a dead detector can never read as 'no threat'",
   "session_id": "replay-detector-failure",
   "labels": {
     "kind": "edge",
@@ -10,7 +10,9 @@
       "state": "degraded"
     }
   },
-  "restarts": [2],
+  "restarts": [
+    2
+  ],
   "faults": [
     {
       "component": "detector:deauth",
@@ -59,6 +61,10 @@
         }
       ]
     },
-    { "cycle_id": 3, "clock_ts": 1700000030.0, "rows": [] }
+    {
+      "cycle_id": 3,
+      "clock_ts": 1700000030.0,
+      "rows": []
+    }
   ]
 }

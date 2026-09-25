@@ -7,7 +7,12 @@
     "kind": "suspicious",
     "expect": {
       "detect": true,
-      "state": "alert"
+      "state": "alert",
+      "max_latency_cycles": 1,
+      "entity_keys": [
+        "DD:DD:DD:DD:DD:01"
+      ],
+      "max_incidents": 1
     }
   },
   "config_overrides": {
@@ -53,6 +58,10 @@
         }
       ]
     },
-    { "cycle_id": 3, "clock_ts": 1700000030.0, "rows": [] }
+    {
+      "cycle_id": 3,
+      "clock_ts": 1700000030.0,
+      "rows": []
+    }
   ]
 }

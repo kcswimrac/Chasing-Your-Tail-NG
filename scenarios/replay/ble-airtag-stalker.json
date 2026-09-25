@@ -1,0 +1,84 @@
+{
+  "scenario_version": 1,
+  "scenario_id": "ble-airtag-stalker",
+  "description": "A BLE device advertising an AirTag-style tracker name follows the operator through a session: alert-band tracker score on first observation.",
+  "session_id": "replay-ble-airtag-stalker",
+  "labels": {
+    "kind": "suspicious",
+    "expect": {
+      "detect": true,
+      "state": "alert",
+      "max_latency_cycles": 1,
+      "entity_keys": [
+        "DD:DD:DD:DD:DD:02"
+      ],
+      "max_incidents": 1
+    }
+  },
+  "config_overrides": {
+    "ble_tracker": {
+      "enabled": true
+    }
+  },
+  "cycles": [
+    {
+      "cycle_id": 1,
+      "clock_ts": 1700000000.0,
+      "rows": [
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "DD:DD:DD:DD:DD:02",
+            "type": "BTLE Device",
+            "last_time": 1699999995.0,
+            "device": {
+              "kismet.device.base.type": "BTLE Device",
+              "kismet.device.base.commonname": "AirTag"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "cycle_id": 2,
+      "clock_ts": 1700000030.0,
+      "rows": [
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "DD:DD:DD:DD:DD:02",
+            "type": "BTLE Device",
+            "last_time": 1699999995.0,
+            "device": {
+              "kismet.device.base.type": "BTLE Device",
+              "kismet.device.base.commonname": "AirTag"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "cycle_id": 3,
+      "clock_ts": 1700000060.0,
+      "rows": [
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "DD:DD:DD:DD:DD:02",
+            "type": "BTLE Device",
+            "last_time": 1699999995.0,
+            "device": {
+              "kismet.device.base.type": "BTLE Device",
+              "kismet.device.base.commonname": "AirTag"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "cycle_id": 4,
+      "clock_ts": 1700000090.0,
+      "rows": []
+    }
+  ]
+}

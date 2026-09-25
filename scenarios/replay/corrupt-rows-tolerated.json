@@ -1,0 +1,107 @@
+{
+  "scenario_version": 1,
+  "scenario_id": "corrupt-rows-tolerated",
+  "description": "Degenerate source rows: empty device type, empty device JSON, an exact duplicate row, a non-deauth alert header, a nameless BLE advertisement, a null device blob. The pipeline must tolerate all of them without crashing or filing incidents.",
+  "session_id": "replay-corrupt-rows-tolerated",
+  "labels": {
+    "kind": "edge",
+    "expect": {
+      "detect": false,
+      "state": "clear"
+    }
+  },
+  "cycles": [
+    {
+      "cycle_id": 1,
+      "clock_ts": 1700000000.0,
+      "rows": [
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "AA:BB:CC:DD:EE:41",
+            "type": "",
+            "last_time": 1699999994.0,
+            "device": {}
+          }
+        },
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "AA:BB:CC:DD:EE:42",
+            "type": "Wi-Fi Client",
+            "last_time": 1699999995.0,
+            "device": {
+              "kismet.device.base.signal": {
+                "kismet.common.signal.last_signal": -60
+              },
+              "kismet.device.base.channel": "6"
+            }
+          }
+        },
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "AA:BB:CC:DD:EE:42",
+            "type": "Wi-Fi Client",
+            "last_time": 1699999995.0,
+            "device": {
+              "kismet.device.base.signal": {
+                "kismet.common.signal.last_signal": -60
+              },
+              "kismet.device.base.channel": "6"
+            }
+          }
+        },
+        {
+          "source": "kismet.alerts",
+          "row": {
+            "ts_sec": 1699999996.0,
+            "header": "CORRUPT",
+            "json": {
+              "kismet.alert.header": "CORRUPT",
+              "kismet.alert.text": "Detected deauthentication attack",
+              "kismet.alert.source_mac": "AA:BB:CC:0D:00:99",
+              "kismet.alert.dest_mac": "AA:BB:CC:DD:EE:41",
+              "kismet.alert.channel": 6
+            },
+            "src_mac": "AA:BB:CC:0D:00:99",
+            "dst_mac": "AA:BB:CC:DD:EE:41",
+            "bssid": ""
+          }
+        },
+        {
+          "source": "ble",
+          "row": {
+            "mac": "DD:DD:DD:DD:DD:99",
+            "ts": 1699999995.0,
+            "rssi": -80.0
+          }
+        }
+      ]
+    },
+    {
+      "cycle_id": 2,
+      "clock_ts": 1700000030.0,
+      "rows": [
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "AA:BB:CC:DD:EE:43",
+            "type": "Wi-Fi Client",
+            "last_time": 1700000025.0
+          }
+        }
+      ]
+    },
+    {
+      "cycle_id": 3,
+      "clock_ts": 1700000060.0,
+      "rows": []
+    },
+    {
+      "cycle_id": 4,
+      "clock_ts": 1700000090.0,
+      "rows": []
+    }
+  ]
+}

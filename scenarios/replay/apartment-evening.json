@@ -1,0 +1,151 @@
+{
+  "scenario_version": 1,
+  "scenario_id": "apartment-evening",
+  "description": "Evening at home: neighbor networks and ordinary client traffic, nothing hostile. Random neighbors' APs must never alert on their own (rogue fires on monitored SSIDs only).",
+  "session_id": "replay-apartment-evening",
+  "labels": {
+    "kind": "normal",
+    "expect": {
+      "detect": false,
+      "state": "clear"
+    }
+  },
+  "cycles": [
+    {
+      "cycle_id": 1,
+      "clock_ts": 1700000000.0,
+      "rows": [
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "BB:BB:CC:01:00:01",
+            "type": "Wi-Fi AP",
+            "last_time": 1699999995.0,
+            "device": {
+              "dot11.device": {
+                "dot11.device.advertised_ssid_map": [
+                  {
+                    "dot11.advertisedssid.ssid": "UnitB-WiFi",
+                    "dot11.advertisedssid.crypt_string": "WPA2-PSK"
+                  }
+                ]
+              },
+              "kismet.device.base.channel": "11"
+            }
+          }
+        },
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "AA:BB:CC:DD:EE:01",
+            "type": "Wi-Fi Client",
+            "last_time": 1699999992.0,
+            "device": {
+              "kismet.device.base.signal": {
+                "kismet.common.signal.last_signal": -60
+              },
+              "kismet.device.base.channel": "6"
+            }
+          }
+        },
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "AA:BB:CC:DD:EE:02",
+            "type": "Wi-Fi Client",
+            "last_time": 1699999988.0,
+            "device": {
+              "kismet.device.base.signal": {
+                "kismet.common.signal.last_signal": -60
+              },
+              "kismet.device.base.channel": "6"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "cycle_id": 2,
+      "clock_ts": 1700000030.0,
+      "rows": [
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "BB:BB:CC:01:00:02",
+            "type": "Wi-Fi AP",
+            "last_time": 1700000025.0,
+            "device": {
+              "dot11.device": {
+                "dot11.device.advertised_ssid_map": [
+                  {
+                    "dot11.advertisedssid.ssid": "CasaDeAna",
+                    "dot11.advertisedssid.crypt_string": "WPA2-PSK"
+                  }
+                ]
+              },
+              "kismet.device.base.channel": "1"
+            }
+          }
+        },
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "AA:BB:CC:DD:EE:01",
+            "type": "Wi-Fi Client",
+            "last_time": 1700000022.0,
+            "device": {
+              "kismet.device.base.signal": {
+                "kismet.common.signal.last_signal": -60
+              },
+              "kismet.device.base.channel": "6"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "cycle_id": 3,
+      "clock_ts": 1700000060.0,
+      "rows": [
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "BB:BB:CC:01:00:01",
+            "type": "Wi-Fi AP",
+            "last_time": 1700000055.0,
+            "device": {
+              "dot11.device": {
+                "dot11.device.advertised_ssid_map": [
+                  {
+                    "dot11.advertisedssid.ssid": "UnitB-WiFi",
+                    "dot11.advertisedssid.crypt_string": "WPA2-PSK"
+                  }
+                ]
+              },
+              "kismet.device.base.channel": "11"
+            }
+          }
+        },
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "AA:BB:CC:DD:EE:03",
+            "type": "Wi-Fi Client",
+            "last_time": 1700000052.0,
+            "device": {
+              "kismet.device.base.signal": {
+                "kismet.common.signal.last_signal": -60
+              },
+              "kismet.device.base.channel": "6"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "cycle_id": 4,
+      "clock_ts": 1700000090.0,
+      "rows": []
+    }
+  ]
+}

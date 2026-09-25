@@ -113,6 +113,26 @@ def main(argv: list[str] | None = None) -> int:
         help="Write the replay report JSON to this path (default: stdout)",
     )
 
+    ev = sub.add_parser(
+        "eval",
+        help="Run the labeled replay corpus and enforce the calibrated gates",
+    )
+    ev.add_argument(
+        "--scenarios",
+        default="scenarios/replay",
+        help="Directory of labeled scenario JSON files (default: scenarios/replay)",
+    )
+    ev.add_argument(
+        "--gates",
+        default="eval/gates.json",
+        help="Path to the calibrated gates document (default: eval/gates.json)",
+    )
+    ev.add_argument(
+        "--json-out",
+        default=None,
+        help="Write the evaluation summary JSON to this path (default: stdout)",
+    )
+
     args = parser.parse_args(argv)
 
     if args.init_store_key:
@@ -191,6 +211,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "replay":
         return _replay_cmd(args)
 
+    if args.cmd == "eval":
+        return _eval_cmd(args)
+
     if args.cmd == "baseline":
         return _baseline_cmd(args)
 
@@ -211,6 +234,26 @@ def main(argv: list[str] | None = None) -> int:
         repair_empty_store=args.repair_empty_store,
         max_cycles=args.max_cycles,
     )
+
+
+def _eval_cmd(args) -> int:
+    import json
+    from pathlib import Path
+
+    from cyt_platform.replay.evaluation import run_eval
+
+    summary, code = run_eval(args.scenarios, args.gates)
+    data = json.dumps(summary, indent=2, sort_keys=True).encode("utf-8")
+    if args.json_out:
+        Path(args.json_out).write_bytes(data)
+        print(
+            f"eval: {'GREEN' if code == 0 else 'RED'} "
+            f"({summary.get('scenarios', 0)} scenarios) -> {args.json_out}",
+            file=sys.stderr,
+        )
+    else:
+        sys.stdout.buffer.write(data + b"\n")
+    return code
 
 
 def _replay_cmd(args) -> int:
