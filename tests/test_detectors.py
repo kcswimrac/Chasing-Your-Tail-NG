@@ -161,6 +161,64 @@ def test_rogue_result_reasons_are_the_precontract_strings():
     assert fields["summary"] == "rogue_ap ssid_present"
 
 
+def test_subject_fingerprint_is_deterministic():
+    from cyt_platform.detectors import subject_fingerprint
+
+    assert subject_fingerprint("AA:BB:CC:00:00:01") == subject_fingerprint(
+        "AA:BB:CC:00:00:01"
+    )
+    assert subject_fingerprint("AA:BB:CC:00:00:01") != subject_fingerprint(
+        "AA:BB:CC:00:00:02"
+    )
+    # Same 32-bit width as the pre-contract subject_fp surface.
+    assert 0 <= subject_fingerprint("x") < 0xFFFFFFFF
+
+
+def test_ble_result_maps_detection_to_contract():
+    from cyt_platform.detectors import subject_fingerprint
+    from cyt_platform.ble_tracker import _ble_result
+
+    result = _ble_result(
+        "DD:DD:DD:DD:DD:01",
+        {"kismet.device.base.commonname": "Tile Tracker"},
+        score=0.8,
+        reasons=["BLE/BTLE PHY", "name/manuf matches tracker pattern (Tile)"],
+        now=1700000000.0,
+    )
+    assert result.detector == "ble"
+    assert result.kind == "ble_tracker"
+    assert result.subject == "DD:DD:DD:DD:DD:01"
+    assert result.severity == "alert"  # score >= 0.8
+    assert result.summary == "ble_tracker score=0.80"
+    assert result.detail == {
+        "score": 0.8,
+        "name": "Tile Tracker",
+    }
+    assert result.confidence == 0.8
+    assert result.subject_fp == subject_fingerprint("DD:DD:DD:DD:DD:01")
+    assert [line.kind for line in result.evidence] == [
+        "ble_signal",
+        "ble_signal",
+        "score",
+    ]
+
+
+def test_ble_result_reasons_match_precontract_order():
+    from cyt_platform.detectors import incident_fields
+    from cyt_platform.ble_tracker import _ble_result
+
+    reasons = ["BLE/BTLE PHY", "name/manuf matches tracker pattern (Tile)"]
+    result = _ble_result(
+        "DD:DD:DD:DD:DD:01",
+        {"kismet.device.base.commonname": "Tile Tracker"},
+        score=0.6,
+        reasons=reasons,
+        now=1700000000.0,
+    )
+    fields = incident_fields(result, session_id="s")
+    assert fields["evidence"]["reasons"] == reasons + ["score=0.60"]
+
+
 # --- validation ---------------------------------------------------------------
 
 

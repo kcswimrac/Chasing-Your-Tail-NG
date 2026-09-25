@@ -21,9 +21,21 @@ ie-relink path emits ``info`` — validated only as non-empty.
 
 from __future__ import annotations
 
+import hashlib
 import math
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional, Tuple
+
+
+def subject_fingerprint(subject: str) -> int:
+    """Deterministic privacy-safe fingerprint of a subject identity.
+
+    Replaces salted ``hash()`` fingerprints: stable across processes and
+    restarts (locked decision 4, deterministic core). Same 32-bit width as
+    the pre-contract ``subject_fp`` surface.
+    """
+    digest = hashlib.sha1(subject.encode("utf-8")).digest()
+    return int.from_bytes(digest[:4], "big") % 0xFFFFFFFF
 
 
 @dataclass(frozen=True)
