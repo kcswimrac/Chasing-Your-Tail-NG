@@ -5,13 +5,20 @@ Detects devices that may be following or tracking the user
 import json
 import sqlite3
 import logging
+import sys
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass
 from collections import defaultdict
 import pathlib
 
-from input_validation import InputValidator
+# Legacy quarantine: shared security modules are canonical now and live in
+# cyt_platform/. Bootstrap the repo root so this script still runs from a
+# source checkout without installation.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from cyt_platform.input_validation import InputValidator
 
 def _md_safe(value: str) -> str:
     """Escape RF-sourced text for markdown report lines (pandoc renders the HTML)."""

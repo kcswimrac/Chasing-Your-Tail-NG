@@ -5,12 +5,19 @@ Correlates device appearances with GPS locations for surveillance detection
 import json
 import time
 import logging
+import sys
 from datetime import datetime
+from pathlib import Path
 from typing import Dict, List, Tuple, Optional, NamedTuple
 from dataclasses import dataclass
 import math
 
-from input_validation import InputValidator
+# Legacy quarantine: shared security modules are canonical now and live in
+# cyt_platform/. Bootstrap the repo root so this script still runs from a
+# source checkout without installation.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from cyt_platform.input_validation import InputValidator
 
 def _xml_safe(value: str) -> str:
     """Escape RF-sourced text for KML XML text nodes (<name>, etc.)."""

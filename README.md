@@ -10,7 +10,9 @@ This project has been security-hardened to eliminate critical vulnerabilities:
 - **Input validation** and sanitization
 - **Secure ignore list loading** (no more `exec()` calls)
 
-**⚠️ REQUIRED: Run `python3 migrate_credentials.py` before first use to secure your API keys!**
+**⚠️ Using the legacy toolchain (WiGLE credentials, GUI, batch analysis)? Run
+`python3 legacy/migrate_credentials.py` before first use to secure your API keys.**
+The headless EDC platform (`cyt_platform`) does not use WiGLE API keys.
 
 ## Features
 
@@ -42,18 +44,19 @@ This project has been security-hardened to eliminate critical vulnerabilities:
 pip3 install -r requirements.txt
 ```
 
-### 2. Security Setup (REQUIRED FIRST TIME)
+### 2. Security Setup (legacy toolchain — REQUIRED FIRST TIME)
 ```bash
-# Migrate credentials from insecure config.json
-python3 migrate_credentials.py
+# Migrate credentials from insecure config.json (legacy toolchain only)
+python3 legacy/migrate_credentials.py
 
 # Verify security hardening
-python3 chasing_your_tail.py
+python3 legacy/chasing_your_tail.py
 # Should show: "🔒 SECURE MODE: All SQL injection vulnerabilities have been eliminated!"
 ```
 
 ### 3. Configure System
-Edit `config.json` with your paths and settings:
+Legacy tools read `config.json`; the headless EDC platform reads
+`config.edc.json`. Edit the one matching your path — the legacy keys:
 - Kismet database path pattern
 - Log and ignore list directories
 - Time window configurations
@@ -74,7 +77,7 @@ python -m cyt_platform
 
 # Legacy in-memory-only loop (no durable store)
 python -m cyt_platform --legacy-loop
-# or: python3 chasing_your_tail.py --legacy-loop
+# or: python3 legacy/chasing_your_tail.py --legacy-loop
 ```
 
 Status glance file: `data/run/status.json` → `state`: `clear` | `watch` | `alert` | `degraded` | `fail`.
@@ -140,17 +143,17 @@ python -m cyt_platform --push-flush
 Enabled by default in service loop when Kismet DB is present:
 - **IE fingerprinting** — re-links randomized MACs via probe SSID set + IE tags
 - **BLE tracker heuristics** — AirTag/Tile-style devices → incidents
-- **Deauth detector** — `deauth_detector.py` (CM5 branch)
-- **Rogue/evil-twin** — `rogue_ap_detector.py` (CM5 branch)
+- **Deauth detector** — `cyt_platform/deauth_detector.py` (CM5 branch)
+- **Rogue/evil-twin** — `cyt_platform/rogue_ap_detector.py` (CM5 branch)
 - **GPS co-travel** — multi-cluster persistence scoring
 
 Configure `rf`, `ie_fingerprint`, `ble_tracker`, `gps_fusion`, `deauth_detection`, `rogue_ap_detection` in config.
 
 Field deploy: see `deploy/FIELD_DEPLOY.md` and `docs/EDC_PLATFORM_DESIGN.md`.
 
-### GUI Interface (lab / optional)
+### GUI Interface (lab / optional — quarantined)
 ```bash
-python3 cyt_gui.py  # Enhanced GUI with surveillance analysis
+python3 legacy/cyt_gui.py  # Enhanced GUI with surveillance analysis
 ```
 **GUI Features:**
 - 🗺️ **Surveillance Analysis** button - GPS-correlated persistence detection with spectacular KML visualization
@@ -163,69 +166,84 @@ python3 cyt_gui.py  # Enhanced GUI with surveillance analysis
 python -m cyt_platform
 
 # Start Kismet (ONLY working script - July 23, 2025 fix)
-./start_kismet_clean.sh
+./legacy/start_kismet_clean.sh
 ```
 
-### Data Analysis
+### Data Analysis (quarantined)
 ```bash
 # Analyze collected probe data (past 14 days, local only - default)
-python3 probe_analyzer.py
+python3 legacy/probe_analyzer.py
 
 # Analyze past 7 days only
-python3 probe_analyzer.py --days 7
+python3 legacy/probe_analyzer.py --days 7
 
 # Analyze ALL logs (may be slow for large datasets)
-python3 probe_analyzer.py --all-logs
+python3 legacy/probe_analyzer.py --all-logs
 
 # Analyze WITH WiGLE API calls (consumes API credits!)
-python3 probe_analyzer.py --wigle
+python3 legacy/probe_analyzer.py --wigle
 ```
 
-### Surveillance Detection & Advanced Visualization
+### Surveillance Detection & Advanced Visualization (quarantined)
 ```bash
 # 🆕 NEW: Automatic GPS extraction with spectacular KML visualization
-python3 surveillance_analyzer.py
+python3 legacy/surveillance_analyzer.py
 
 # Run analysis with demo GPS data (for testing - uses Phoenix coordinates)
-python3 surveillance_analyzer.py --demo
+python3 legacy/surveillance_analyzer.py --demo
 
 # Analyze specific Kismet database
-python3 surveillance_analyzer.py --kismet-db /path/to/kismet.db
+python3 legacy/surveillance_analyzer.py --kismet-db /path/to/kismet.db
 
 # Focus on stalking detection with a high threat threshold
-python3 surveillance_analyzer.py --stalking-only --min-threat 0.8
+python3 legacy/surveillance_analyzer.py --stalking-only --min-threat 0.8
 
 # Export results to JSON for further analysis
-python3 surveillance_analyzer.py --output-json analysis_results.json
+python3 legacy/surveillance_analyzer.py --output-json analysis_results.json
 
 # Analyze with external GPS data from JSON file
-python3 surveillance_analyzer.py --gps-file gps_coordinates.json
+python3 legacy/surveillance_analyzer.py --gps-file gps_coordinates.json
 ```
 
-### Ignore List Management
+### Ignore List Management (quarantined)
 ```bash
 # Create new ignore lists from current Kismet data
-python3 create_ignore_list.py
+python3 legacy/create_ignore_list.py
 ```
 **Note**: Ignore lists are stored as JSON files in `./ignore_lists/`
 
 ## Core Components
 
-- **chasing_your_tail.py**: Core monitoring engine with real-time Kismet database queries
-- **cyt_gui.py**: Enhanced Tkinter GUI with surveillance analysis capabilities
-- **surveillance_analyzer.py**: GPS surveillance detection with automatic coordinate extraction and advanced KML visualization
-- **surveillance_detector.py**: Core persistence detection engine for suspicious device patterns
-- **gps_tracker.py**: GPS tracking with location clustering and spectacular Google Earth KML generation
-- **probe_analyzer.py**: Post-processing tool with WiGLE integration
-- **start_kismet_clean.sh**: ONLY working Kismet startup script (July 23, 2025 fix)
+**Canonical platform** — `cyt_platform/` (the headless EDC service; use the
+Operator CLI above; design in `docs/EDC_PLATFORM_DESIGN.md`):
 
-### Security Components
-- **secure_database.py**: SQL injection prevention
-- **secure_credentials.py**: Encrypted credential management
-- **secure_ignore_loader.py**: Safe ignore list loading
-- **secure_main_logic.py**: Secure monitoring logic
-- **input_validation.py**: Input sanitization and validation
-- **migrate_credentials.py**: Credential migration tool
+- **cyt_platform/secure_database.py**: SQL injection prevention, read-only capture access
+- **cyt_platform/secure_credentials.py**: Encrypted credential management
+- **cyt_platform/secure_ignore_loader.py**: Safe ignore list loading
+- **cyt_platform/secure_main_logic.py**: Secure monitoring logic (window matching + hooks)
+- **cyt_platform/input_validation.py**: Input sanitization and validation
+- **cyt_platform/deauth_detector.py** / **rogue_ap_detector.py**: CM5-branch RF detectors
+
+**Quarantined legacy tools** — `legacy/` (archived; map in `legacy/README.md`):
+
+- **legacy/chasing_your_tail.py**: Historical entry point → dispatches to `cyt_platform`
+- **legacy/cyt_gui.py**: Enhanced Tkinter GUI with surveillance analysis capabilities
+- **legacy/surveillance_analyzer.py**: GPS surveillance detection with automatic coordinate extraction and advanced KML visualization
+- **legacy/surveillance_detector.py**: Core persistence detection engine for suspicious device patterns
+- **legacy/gps_tracker.py**: GPS tracking with location clustering and spectacular Google Earth KML generation
+- **legacy/probe_analyzer.py**: Post-processing tool with WiGLE integration
+- **legacy/migrate_credentials.py**: Credential migration tool (legacy toolchain)
+- **legacy/start_kismet_clean.sh**: ONLY working Kismet startup script (July 23, 2025 fix)
+
+## Legacy Quarantine
+
+The repository root once carried two generations of tooling. Per locked
+decision 2 of the trustworthiness build, `cyt_platform/` is the canonical
+platform: shared modules with a proven runtime role moved **into** the
+package, and every historical root-level tool moved under `legacy/` with a
+README mapping each tool to its canonical successor (`legacy/README.md`).
+Nothing under `cyt_platform/` imports from `legacy/` — enforced by
+`tests/test_legacy_quarantine.py`.
 
 ## Output Files & Project Structure
 
@@ -274,7 +292,7 @@ Advanced persistence detection algorithms analyze device behavior patterns:
 
 ## Configuration
 
-All settings are centralized in `config.json`:
+Legacy-toolchain settings are centralized in `config.json`:
 ```json
 {
   "kismet_db_path": "/path/to/kismet/*.kismet",
@@ -289,7 +307,7 @@ All settings are centralized in `config.json`:
 }
 ```
 
-WiGLE API credentials are now securely encrypted in `secure_credentials/encrypted_credentials.json`.
+WiGLE API credentials are now securely encrypted in `secure_credentials/encrypted_credentials.json` (the manager lives at `cyt_platform/secure_credentials.py` since the quarantine).
 
 ## Security Features
 

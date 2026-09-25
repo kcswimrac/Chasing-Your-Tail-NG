@@ -2,8 +2,11 @@
 ### @matt0177
 ### Released under the MIT License https://opensource.org/licenses/MIT
 ###
-### Default entry now prefers the headless EDC platform (cyt_platform).
-### Use --legacy-loop for the original in-memory-only loop.
+### The original in-memory-only monitoring loop (no CytStore / status.json).
+### Canonical home since the legacy quarantine (locked decision 2): the
+### platform ships this as its ``--legacy-loop`` compat path. The historical
+### ``chasing_your_tail.py`` entry now lives in ``legacy/`` and dispatches
+### here.
 
 import glob
 import logging
@@ -13,10 +16,10 @@ import signal
 import sys
 import time
 
-from secure_ignore_loader import load_ignore_lists
-from secure_database import SecureKismetDB
-from secure_main_logic import SecureCYTMonitor
-from secure_credentials import secure_config_loader
+from cyt_platform.secure_credentials import secure_config_loader
+from cyt_platform.secure_database import SecureKismetDB
+from cyt_platform.secure_ignore_loader import load_ignore_lists
+from cyt_platform.secure_main_logic import SecureCYTMonitor
 
 
 def run_legacy_loop() -> int:
@@ -108,18 +111,3 @@ def run_legacy_loop() -> int:
             logging.error(error_msg)
             continue
         time.sleep(check_interval)
-
-
-def main() -> int:
-    if "--legacy-loop" in sys.argv:
-        return run_legacy_loop()
-    # Prefer headless EDC platform
-    from cyt_platform.__main__ import main as platform_main
-
-    # Strip our own re-entry flag if present; platform argparse handles the rest
-    argv = [a for a in sys.argv[1:] if a != "--legacy-loop"]
-    return platform_main(argv)
-
-
-if __name__ == "__main__":
-    sys.exit(main() or 0)

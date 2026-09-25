@@ -31,8 +31,8 @@ from typing import Any, Dict, List, Optional
 
 from cyt_platform.confidence import FusedAssessment, fuse
 from cyt_platform.detectors import DetectionResult
+from cyt_platform.input_validation import InputValidator
 from cyt_platform.privacy import redact_evidence_text
-from input_validation import InputValidator
 
 logger = logging.getLogger(__name__)
 

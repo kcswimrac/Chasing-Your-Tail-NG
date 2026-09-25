@@ -9,8 +9,6 @@ import sys
 import time
 from typing import Optional
 
-from secure_database import SecureKismetDB
-
 from cyt_platform import notify
 from cyt_platform.baseline import BaselineEngine, resolve_place
 from cyt_platform.config import ensure_runtime_dirs, load_json
@@ -25,6 +23,7 @@ from cyt_platform.privacy import (
 )
 from cyt_platform.push import PushQueue
 from cyt_platform.rf_plugins import RFPluginRunner
+from cyt_platform.secure_database import SecureKismetDB
 from cyt_platform.sinks.log_file import LogFileSink, NullSink
 from cyt_platform.status import StatusEngine
 from cyt_platform.store import CytStore

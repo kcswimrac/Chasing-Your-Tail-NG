@@ -27,12 +27,16 @@ include = ["cyt_platform*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["."]
+# "." — the project root (cyt_platform + configs). "legacy" — quarantined
+# legacy tools stay importable under their historical top-level names so
+# their tests keep running green (locked decision 9).
+pythonpath = [".", "legacy"]
 
 [tool.ruff]
-# Lint gate is scoped to the platform package and its tests. Legacy root-level
-# tools are quarantined later in the trustworthiness build and are deliberately
-# out of the gate until then.
+# Lint gate is scoped to the platform package and its tests. Legacy tools are
+# quarantined under legacy/ (locked decision 2) and stay out of the gate;
+# the shared modules that have a proven runtime role moved into cyt_platform/
+# and are linted like the rest of the package.
 include = ["cyt_platform/**/*.py", "tests/**/*.py"]
 # Python 3.9 is the supported floor (requires-python); pin it so ruff never
 # suggests 3.10+ syntax on hot paths.

@@ -11,7 +11,7 @@ from typing import Optional, Dict, Any
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-from input_validation import InputValidator
+from cyt_platform.input_validation import InputValidator
 
 logger = logging.getLogger(__name__)
 

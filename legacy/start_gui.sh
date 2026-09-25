@@ -25,8 +25,8 @@ done
 
 echo "$(date): X server available, starting GUI..." >> gui_startup.log
 
-# Start the GUI and log any output
-python3 cyt_gui.py >> gui_startup.log 2>&1 &
+# Start the GUI and log any output (resolve the sibling script regardless of CWD)
+python3 "$(dirname "$0")/cyt_gui.py" >> gui_startup.log 2>&1 &
 
 # Log success
 echo "$(date): CYT GUI started successfully" >> gui_startup.log

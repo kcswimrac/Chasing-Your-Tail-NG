@@ -4,12 +4,11 @@ from __future__ import annotations
 
 from typing import Optional, TextIO, Union
 
-from secure_ignore_loader import SecureIgnoreLoader
-from secure_main_logic import SecureCYTMonitor
-
 from cyt_platform.baseline import BaselineEngine, resolve_place
 from cyt_platform.config import ignore_list_paths
 from cyt_platform.incidents import IncidentDeduper
+from cyt_platform.secure_ignore_loader import SecureIgnoreLoader
+from cyt_platform.secure_main_logic import SecureCYTMonitor
 from cyt_platform.sinks.log_file import LogFileSink, NullSink
 from cyt_platform.store import CytStore
 

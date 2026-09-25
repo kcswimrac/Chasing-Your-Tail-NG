@@ -4,13 +4,20 @@ import json
 import pathlib
 import glob
 import re
+import sys
 from datetime import datetime
+from pathlib import Path
 import requests
 import sqlite3
 import argparse
 
+# Legacy quarantine: shared security modules are canonical now and live in
+# cyt_platform/. Bootstrap the repo root so this script still runs from a
+# source checkout without installation.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 # Load config with secure credentials
-from secure_credentials import secure_config_loader
+from cyt_platform.secure_credentials import secure_config_loader
 config, credential_manager = secure_config_loader('config.json')
 
 class ProbeAnalyzer:

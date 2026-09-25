@@ -276,7 +276,7 @@ def main(argv: list[str] | None = None) -> int:
         return _baseline_cmd(args)
 
     if args.legacy_loop:
-        from chasing_your_tail import run_legacy_loop
+        from cyt_platform.legacy_loop import run_legacy_loop
 
         return run_legacy_loop()
 
