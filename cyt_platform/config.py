@@ -123,19 +123,30 @@ DEFAULTS: Dict[str, Any] = {
         # contribution and never count as independent evidence (a new
         # detector's kinds must be deliberately listed to gain
         # alertability).
-        "self_ref_kinds": ["score"],
-        # Kinds that restate the detector's own computed conclusion rather
-        # than describe an observed phenomenon: they contribute weight but
-        # never count toward the independent-evidence alert gate.
+        "self_ref_kinds": [
+            "attack_signature",
+            "score",
+            "source_severity",
+        ],
+        # Kinds that restate the detector's own computed conclusion or its
+        # input facets rather than describe an observed phenomenon: they
+        # contribute weight but never count toward the independent-evidence
+        # alert gate. S1: one deauth alert row is ONE observation — its
+        # severity label (source_severity) and type/frame signature
+        # (attack_signature) are facets of that same row, not independent
+        # corroboration; counting them let a single alert row satisfy the
+        # kinds gate by itself.
         "weights": {
             # Observed deauth/disassoc management-frame pattern toward a
             # target (Kismet alert-derived): a distinct RF attack class.
             "deauth_pattern": 0.35,
-            # Attack type + frame-count signature: a separate classifier
-            # dimension of the same alert family.
+            # Attack type + frame-count signature: a facet of the same
+            # alert row as deauth_pattern — contributes weight, never
+            # independent kinds (self_ref_kinds).
             "attack_signature": 0.20,
             # The capture layer's own severity classification (Kismet is
-            # a trusted sensor per the EDC design doc).
+            # a trusted sensor per the EDC design doc): a restated
+            # conclusion, so weight-only (self_ref_kinds).
             "source_severity": 0.15,
             # One Kismet rogue/evil-twin alert reason. All of an alert's
             # reasons share this kind, so repeats never raise the

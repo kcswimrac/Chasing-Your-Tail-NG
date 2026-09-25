@@ -57,7 +57,27 @@ def _cotravel_result(
     (including its deterministic sha1-based fingerprint). ``confidence``
     carries the co-travel score — co-travel has a real computed score,
     unlike the capture-scan detectors.
+
+    S2/D4: each matched operator visit with ambient bystanders also emits
+    a ``density`` CONTRA line (a count — never an identifier), so the
+    against block is populated on the live path and crowded places
+    discount tracking confidence through the D4 model.
     """
+    visits = detail.get("operator_visits") or []
+    contra = tuple(
+        EvidenceLine(
+            "density",
+            f"Ambient density {int(visit.get('density') or 0)} other device(s) "
+            f"near operator visit #{position}",
+        )
+        for position, visit in enumerate(
+            sorted(
+                visits, key=lambda item: float(item.get("enter_ts") or 0.0)
+            ),
+            start=1,
+        )
+        if int(visit.get("density") or 0) > 0
+    )
     return DetectionResult(
         detector="cotravel",
         kind="cotravel",
@@ -78,6 +98,7 @@ def _cotravel_result(
             ),
             EvidenceLine("score", f"score={score:.2f}"),
         ),
+        contra=contra,
         confidence=score,
         subject_fp=int(hashlib.sha1(key.encode("utf-8")).hexdigest()[:8], 16),
     )

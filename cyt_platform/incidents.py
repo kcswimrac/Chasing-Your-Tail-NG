@@ -329,9 +329,12 @@ INCIDENTS_V2_DEFAULTS: Dict[str, Any] = {
     # by alert_gate + corroboration below).
     "alert_confidence": 0.60,
     # Alert escalation needs corroboration beyond the fusion gate: at least
-    # this many DISTINCT detectors contributing to the phenomenon (the
-    # spec's "tracker-class detector corroboration" leg; the "2 independent
-    # locations" leg is covered by the fusion gate's independent-kind rule).
+    # this many DISTINCT non-repetition detectors contributing to the
+    # phenomenon (the spec's "tracker-class detector corroboration" leg; the
+    # "2 independent locations" leg is covered by the fusion gate's
+    # independent-kind rule). Window-match repetition kinds (see
+    # REPETITION_KINDS) never count: a subject seen again is repetition,
+    # not a second detector (S1).
     "alert_min_detectors": 2,
     # Stale-close: no fresh evidence for this long -> RESOLVED.
     "close_after_s": 600.0,
@@ -356,6 +359,13 @@ INCIDENTS_V2_DEFAULTS: Dict[str, Any] = {
 # clock (deauth results carry the attack's last-frame time). The old
 # "incidents_v2_cursor" key is migrated away in the store's v4 block.
 CURSOR_RUNTIME_KEY = "incidents_v2_cursor_seq"
+
+# S1: window-match repetition kinds — the MatchEvent emissions the deduper
+# files (a subject or SSID being seen AGAIN). Repetition by definition, so
+# these rows corroborate presence but are never a second DETECTOR: they must
+# not satisfy alert_min_detectors, or one real detector row plus one
+# repetition row walks a phenomenon new→observing→watch→alert.
+REPETITION_KINDS = frozenset({"mac_reappear", "ssid_probe_repeat"})
 
 
 def phenomenon_key_for(subject_type: str, subject: str) -> str:
@@ -632,7 +642,11 @@ class IncidentEngine:
             else "info"
         )
         gated = alert_gate(assessment, proposed)
-        distinct_detectors = len(set(assessment.detectors))
+        # S1: repetition rows are not detector corroboration — count only
+        # distinct non-repetition detectors toward the alert gate.
+        distinct_detectors = len(
+            {d for d in assessment.detectors if d not in REPETITION_KINDS}
+        )
         # Corroboration (NEW -> OBSERVING): a second DetectionResult in this
         # group, confidence already at the watch bar, or a cumulative second
         # contribution from an earlier cycle (the ledger outlives cycles).
