@@ -283,11 +283,22 @@ CREATE INDEX IF NOT EXISTS idx_contrib_incident ON incident_contributions(incide
 
 # Additive incidents columns for the D2 lifecycle (guarded idempotent ALTERs,
 # same pattern as the v2 suppressed/evidence_json columns).
+# S12: runtime_state key holding the high-water mark of the incidents
+# consumption sequence (updated_seq). A counter, not a derived MAX():
+# retention purge deletes closed incidents, so a table-derived sequence
+# could regress below the engine's cursor.
+INCIDENT_SEQ_HWM_KEY = "incidents_seq_hwm"
+
 _LIFECYCLE_COLUMNS = (
     ("lifecycle_state", "TEXT"),
     ("confidence", "REAL"),
     ("disposition", "TEXT"),
     ("phenomenon_key", "TEXT"),
+    # S12: monotonic consumption sequence for the incident engine's
+    # cursor, assigned whenever a row is filed or re-filed. The old
+    # timestamp cursor (max(now, newest_last_seen)) silently skipped
+    # rows whose evidence time trailed the cycle clock.
+    ("updated_seq", "INTEGER"),
 )
 
 
@@ -511,6 +522,62 @@ class CytStore:
             "CREATE INDEX IF NOT EXISTS idx_incidents_phenomenon "
             "ON incidents(phenomenon_key)"
         )
+        c.execute(
+            "CREATE INDEX IF NOT EXISTS idx_incidents_updated_seq "
+            "ON incidents(updated_seq)"
+        )
+        self._backfill_updated_seq(c)
+        # S12: the timestamp cursor is superseded by the updated_seq
+        # cursor. A stored wall-clock stamp read as a sequence would skip
+        # every row, so the old key never carries meaning past this
+        # migration.
+        c.execute("DELETE FROM runtime_state WHERE key='incidents_v2_cursor'")
+
+    def _backfill_updated_seq(self, c: sqlite3.Cursor) -> None:
+        """Assign consumption sequences to rows filed before the column.
+
+        Oldest evidence first, so sequence order matches the last_seen
+        order the old timestamp cursor followed. Idempotent: only NULL
+        rows are assigned, continuing after the highest existing sequence,
+        and the counter's high-water mark is seeded once, never lowered.
+        """
+        base = int(
+            c.execute(
+                "SELECT COALESCE(MAX(updated_seq), 0) FROM incidents"
+            ).fetchone()[0]
+        )
+        pending = c.execute(
+            "SELECT id FROM incidents WHERE updated_seq IS NULL "
+            "ORDER BY COALESCE(last_seen, 0), id"
+        ).fetchall()
+        for offset, row in enumerate(pending, start=1):
+            c.execute(
+                "UPDATE incidents SET updated_seq=? WHERE id=?",
+                (base + offset, row["id"]),
+            )
+        if c.execute(
+            "SELECT 1 FROM runtime_state WHERE key=?", (INCIDENT_SEQ_HWM_KEY,)
+        ).fetchone() is None:
+            c.execute(
+                "INSERT INTO runtime_state(key, value, ts) VALUES (?, ?, ?)",
+                (INCIDENT_SEQ_HWM_KEY, str(base + len(pending)), time.time()),
+            )
+
+    def _next_incident_seq(self) -> int:
+        """One past the highest consumption sequence ever assigned.
+
+        The high-water mark lives in runtime_state, not in the table:
+        retention purge deletes closed incidents, and a MAX() over
+        surviving rows could regress below the engine's cursor, making
+        newly filed rows invisible — the exact S12 failure, reintroduced
+        through the back door. Single-writer store; runs inside the
+        caller's transaction, so the counter commits or rolls back with
+        the row it sequences.
+        """
+        raw = self.get_runtime(INCIDENT_SEQ_HWM_KEY)
+        nxt = (int(float(raw)) if raw else 0) + 1
+        self.set_runtime(INCIDENT_SEQ_HWM_KEY, str(nxt))
+        return nxt
 
     def _migrate_v2(self, c: sqlite3.Cursor) -> None:
         c.execute(
@@ -788,8 +855,9 @@ class CytStore:
                 INSERT INTO incidents(
                   incident_key, entity_id, event_type, window_label, severity,
                   session_id, first_seen, last_seen, observation_count, status,
-                  closed_at, summary, detail_json, kismet_db, suppressed, evidence_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 'open', NULL, ?, ?, ?, ?, ?)
+                  closed_at, summary, detail_json, kismet_db, suppressed, evidence_json,
+                  updated_seq
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 'open', NULL, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     incident_key,
@@ -805,6 +873,7 @@ class CytStore:
                     kismet_db,
                     sup,
                     evidence_json,
+                    self._next_incident_seq(),
                 ),
             )
             iid = int(cur.lastrowid)
@@ -820,15 +889,23 @@ class CytStore:
             )
 
         if row["status"] == "closed":
+            # Novelty-gated sequence bump (S12): a re-file moves the row
+            # back into engine view only when its evidence time actually
+            # moved forward — the same re-selection condition the old
+            # timestamp cursor used, minus its skip of late-filed rows.
+            reopened_newer = observed_at > float(row["last_seen"])
             self.conn.execute(
                 """
-                UPDATE incidents SET status='open', last_seen=?, observation_count=observation_count+1,
+                UPDATE incidents SET status='open', last_seen=?,
+                  updated_seq=COALESCE(?, updated_seq),
+                  observation_count=observation_count+1,
                   closed_at=NULL, summary=?, detail_json=COALESCE(?, detail_json), kismet_db=?,
                   severity=?, suppressed=?, evidence_json=COALESCE(?, evidence_json)
                 WHERE id=?
                 """,
                 (
                     observed_at,
+                    self._next_incident_seq() if reopened_newer else None,
                     summary,
                     detail_json,
                     kismet_db,
@@ -856,12 +933,25 @@ class CytStore:
 
         self.conn.execute(
             """
-            UPDATE incidents SET last_seen=?, observation_count=observation_count+1,
+            UPDATE incidents SET last_seen=?, updated_seq=COALESCE(?, updated_seq),
+              observation_count=observation_count+1,
               detail_json=COALESCE(?, detail_json), kismet_db=?,
               suppressed=?, evidence_json=COALESCE(?, evidence_json)
             WHERE id=?
             """,
-            (observed_at, detail_json, kismet_db, sup, evidence_json, row["id"]),
+            (
+                observed_at,
+                (
+                    self._next_incident_seq()
+                    if observed_at > float(row["last_seen"])
+                    else None
+                ),
+                detail_json,
+                kismet_db,
+                sup,
+                evidence_json,
+                row["id"],
+            ),
         )
         return IncidentResult(
             id=int(row["id"]),
@@ -939,9 +1029,10 @@ class CytStore:
               incident_key, entity_id, event_type, window_label, severity,
               session_id, first_seen, last_seen, observation_count, status,
               closed_at, summary, detail_json, kismet_db,
-              lifecycle_state, confidence, disposition, phenomenon_key
+              lifecycle_state, confidence, disposition, phenomenon_key,
+              updated_seq
             ) VALUES (?, ?, 'phenomenon', 'fused', 'info', ?, ?, ?, 0,
-                      'open', NULL, ?, NULL, NULL, 'new', NULL, NULL, ?)
+                      'open', NULL, ?, NULL, NULL, 'new', NULL, NULL, ?, ?)
             """,
             (
                 incident_key,
@@ -951,6 +1042,7 @@ class CytStore:
                 ts,
                 f"phenomenon {entity_type} {subject}",
                 incident_key,
+                self._next_incident_seq(),
             ),
         )
         iid = int(cur.lastrowid)
@@ -1175,26 +1267,29 @@ class CytStore:
             confidence,
         )
 
-    def touched_incidents_since(self, since_ts: float) -> List[dict]:
-        """Detector-owned incident rows last observed after ``since_ts``.
+    def touched_incidents_since(self, since_seq: int) -> List[dict]:
+        """Detector-owned rows not yet consumed by the incident engine.
 
         The engine's per-cycle input: legacy detection rows (lifecycle_state
-        IS NULL, never phenomenon rows), oldest first — deterministic order
-        for deterministic fusion.
+        IS NULL, never phenomenon rows), in filing order — deterministic
+        for deterministic fusion. The cursor is a sequence, not a
+        timestamp (S12): rows filed late — evidence time behind the cycle
+        clock — carry a fresh ``updated_seq`` and are never skipped, and
+        every re-file (a row's last_seen moving) is what re-selects it.
         """
         rows = self.conn.execute(
             """
             SELECT i.id, i.incident_key, i.event_type, i.window_label,
                    i.severity, i.session_id, i.first_seen, i.last_seen,
-                   i.summary, i.evidence_json,
+                   i.summary, i.evidence_json, i.updated_seq,
                    e.entity_type, e.key AS entity_key
             FROM incidents i JOIN entities e ON e.id = i.entity_id
-            WHERE i.last_seen > ?
+            WHERE i.updated_seq > ?
               AND i.lifecycle_state IS NULL
               AND i.event_type != 'phenomenon'
-            ORDER BY i.last_seen, i.incident_key
+            ORDER BY i.updated_seq, i.id
             """,
-            (float(since_ts),),
+            (int(since_seq),),
         ).fetchall()
         return [dict(r) for r in rows]
 
@@ -1518,20 +1613,26 @@ class CytStore:
         counts["baseline_sightings"] = c.execute(
             "DELETE FROM baseline_sightings WHERE ts < ?", (medium_cut,)
         ).rowcount
+        # Incident audit children (D2) go first: with PRAGMA foreign_keys=ON
+        # the parent delete below would fail on the first closed lifecycle
+        # incident — immediate FKs mean the children can never be orphans
+        # while their parent lives (S14). Keeps each timeline/contribution
+        # exactly as long as the incident it explains.
+        purge_sel = (
+            "SELECT id FROM incidents WHERE status='closed' "
+            "AND COALESCE(closed_at, last_seen) < ?"
+        )
+        counts["incident_timeline"] = c.execute(
+            f"DELETE FROM incident_timeline WHERE incident_id IN ({purge_sel})",
+            (medium_cut,),
+        ).rowcount
+        counts["incident_contributions"] = c.execute(
+            f"DELETE FROM incident_contributions WHERE incident_id IN ({purge_sel})",
+            (medium_cut,),
+        ).rowcount
         counts["incidents"] = c.execute(
             "DELETE FROM incidents WHERE status='closed' AND COALESCE(closed_at, last_seen) < ?",
             (medium_cut,),
-        ).rowcount
-        # Incident audit children (D2): orphan purge — rows whose parent
-        # incident is gone have no meaning. Keeps each timeline/contribution
-        # exactly as long as the incident it explains.
-        counts["incident_timeline"] = c.execute(
-            "DELETE FROM incident_timeline "
-            "WHERE incident_id NOT IN (SELECT id FROM incidents)"
-        ).rowcount
-        counts["incident_contributions"] = c.execute(
-            "DELETE FROM incident_contributions "
-            "WHERE incident_id NOT IN (SELECT id FROM incidents)"
         ).rowcount
         # Entities referenced by surviving rows (open incidents, live
         # fingerprint links) are pinned — FKs must not break and the
