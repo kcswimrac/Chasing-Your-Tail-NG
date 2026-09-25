@@ -1,0 +1,64 @@
+{
+  "scenario_version": 1,
+  "scenario_id": "detector_failure",
+  "description": "The deauth detector fails every cycle while the air is otherwise quiet — the run must read degraded every cycle, never clear: a dead detector can never read as 'no threat'",
+  "session_id": "replay-detector-failure",
+  "labels": {
+    "kind": "edge",
+    "expect": {
+      "detect": false,
+      "state": "degraded"
+    }
+  },
+  "restarts": [2],
+  "faults": [
+    {
+      "component": "detector:deauth",
+      "from_cycle": 1,
+      "error": "deauth_scan_failed"
+    }
+  ],
+  "cycles": [
+    {
+      "cycle_id": 1,
+      "clock_ts": 1700000000.0,
+      "rows": [
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "AA:BB:CC:DD:EE:01",
+            "type": "Wi-Fi Client",
+            "last_time": 1699999995.0,
+            "device": {
+              "kismet.device.base.signal": {
+                "kismet.common.signal.last_signal": -60
+              },
+              "kismet.device.base.channel": "6"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "cycle_id": 2,
+      "clock_ts": 1700000015.0,
+      "rows": [
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "AA:BB:CC:DD:EE:01",
+            "type": "Wi-Fi Client",
+            "last_time": 1700000010.0,
+            "device": {
+              "kismet.device.base.signal": {
+                "kismet.common.signal.last_signal": -62
+              },
+              "kismet.device.base.channel": "6"
+            }
+          }
+        }
+      ]
+    },
+    { "cycle_id": 3, "clock_ts": 1700000030.0, "rows": [] }
+  ]
+}
