@@ -156,6 +156,44 @@ def test_rogue_alert_does_not_refile_after_restart(tmp_path):
     assert incident["last_seen"] == pytest.approx(1700000055.0)
 
 
+# --- device-row detector scenarios (BLE, co-travel) ------------------------------
+
+
+def test_ble_scenario_detects_tracker(tmp_path):
+    report = run_scenario(SCENARIOS / "walk-ble-tracker.json", tmp_path)
+    assert len(report["incidents"]) == 1
+    incident = report["incidents"][0]
+    assert incident["event_type"] == "ble_tracker"
+    assert incident["severity"] == "alert"
+    assert incident["entity_key"] == "DD:DD:DD:DD:DD:01"
+    # observed_at is the cycle clock, not a device timestamp.
+    assert incident["first_seen"] == pytest.approx(1700000000.0)
+
+
+def test_cotravel_scenario_detects_follower(tmp_path):
+    report = run_scenario(SCENARIOS / "walk-cotravel.json", tmp_path)
+    cotravel = [i for i in report["incidents"] if i["event_type"] == "cotravel"]
+    assert len(cotravel) == 2  # follower + operator's own device (self-identity is out of scope)
+    follower = next(
+        i for i in cotravel if i["entity_key"] == "AA:BB:CC:00:00:99"
+    )
+    assert follower["severity"] == "watch"
+    assert follower["first_seen"] == pytest.approx(1700000060.0)
+    # Operator path crosses two distinct places (A then B) — the gps stats
+    # in the cycle summaries carry the fix sequence.
+    fixes = [c["detection"]["gps"] for c in report["cycles"]]
+    assert fixes[0] == {"lat": 33.4, "lon": -112.0}
+    assert fixes[1] == {"lat": 33.41, "lon": -112.01}
+
+
+def test_device_row_scenarios_deterministic(tmp_path):
+    for name in ("walk-ble-tracker", "walk-cotravel"):
+        path = SCENARIOS / f"{name}.json"
+        run_a = run_scenario(path, tmp_path / f"{name}-a")
+        run_b = run_scenario(path, tmp_path / f"{name}-b")
+        assert report_bytes(run_a) == report_bytes(run_b), name
+
+
 # --- scenario validation ---------------------------------------------------------
 
 

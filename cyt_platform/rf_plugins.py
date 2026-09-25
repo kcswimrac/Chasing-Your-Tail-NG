@@ -12,6 +12,11 @@ import logging
 import time
 from typing import Any, Callable, Dict, Optional
 
+from cyt_platform.detectors import (
+    DetectionResult,
+    EvidenceLine,
+    incident_fields,
+)
 from cyt_platform.privacy import sanitize_error
 from cyt_platform.health import (
     GPS_DROPOUT_DEFAULT_SECONDS,
@@ -20,6 +25,16 @@ from cyt_platform.health import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Severity classification shared by the capture-scan detectors. Scan alerts
+# arrive already classified by the Kismet layer; the mapping only translates
+# the source's LOW..CRITICAL bands onto the platform's watch/alert vocabulary.
+SCAN_SEVERITY_MAP = {
+    "LOW": "watch",
+    "MEDIUM": "watch",
+    "HIGH": "alert",
+    "CRITICAL": "alert",
+}
 
 # Kismet capture DB watermark keys in runtime_state. Format: "<key>_ts" holds
 # the epoch second just past the newest alert durably handled (max processed
@@ -52,6 +67,78 @@ def _runtime_watermark_saver(
         store.set_runtime(key, str(ts))
 
     return save
+
+
+def _deauth_result(atk: Any, now: float) -> DetectionResult:
+    """Build the contract result for one deauth attack observation.
+
+    Pure: no store access. Evidence lines carry exactly the reason strings
+    the pre-contract adapter wrote (same order), classified into kinds.
+    Confidence stays None — the capture scan has no computed score; the D4
+    fusion model assigns one.
+    """
+    target = getattr(atk, "target_mac", "?")
+    return DetectionResult(
+        detector="deauth",
+        kind="deauth_attack",
+        subject=str(target).upper(),
+        subject_type="wifi_mac",
+        window_label="deauth",
+        severity=SCAN_SEVERITY_MAP.get(
+            getattr(atk, "severity", "MEDIUM"), "watch"
+        ),
+        observed_at=getattr(atk, "last_seen", None) or now,
+        summary=f"deauth {getattr(atk, 'attack_type', 'attack')}",
+        detail={
+            "attacker": str(getattr(atk, "attacker_mac", "?")).upper(),
+            "frames": getattr(atk, "total_frames", 0),
+            "severity_raw": getattr(atk, "severity", ""),
+        },
+        evidence=(
+            EvidenceLine(
+                "deauth_pattern",
+                f"Deauth/disassoc pattern toward {str(target)[:17]}",
+            ),
+            EvidenceLine(
+                "attack_signature",
+                f"type={getattr(atk, 'attack_type', '?')} "
+                f"frames={getattr(atk, 'total_frames', 0)}",
+            ),
+            EvidenceLine(
+                "source_severity",
+                f"source severity={getattr(atk, 'severity', '?')}",
+            ),
+        ),
+        confidence=None,
+    )
+
+
+def _rogue_result(al: Any, now: float) -> DetectionResult:
+    """Build the contract result for one rogue-AP alert observation.
+
+    Pure: no store access. The alert's own reason list (up to five) is
+    carried as evidence lines; when the source supplies none, the
+    pre-contract default reason applies. Raw SSID text never enters the
+    result — only its length (the privacy policy for status surfaces).
+    """
+    reasons = list(
+        getattr(al, "reasons", None) or ["Rogue/evil-twin AP detected"]
+    )[:5]
+    return DetectionResult(
+        detector="rogue",
+        kind="rogue_ap",
+        subject=str(getattr(al, "rogue_bssid", "?")).upper(),
+        subject_type="wifi_ap",
+        window_label="ap",
+        severity=SCAN_SEVERITY_MAP.get(getattr(al, "severity", "HIGH"), "alert"),
+        observed_at=getattr(al, "timestamp", None) or now,
+        summary="rogue_ap ssid_present",
+        detail={"ssid_len": len(str(getattr(al, "ssid", "?"))), "reasons": reasons},
+        evidence=tuple(
+            EvidenceLine("rogue_reason", reason) for reason in reasons
+        ),
+        confidence=None,
+    )
 
 
 class RFPluginRunner:
@@ -205,7 +292,7 @@ class RFPluginRunner:
         # GPS + co-travel
         if self.gps:
             try:
-                fix = self.gps.ingest_kismet(kdb, recent_window_s)
+                fix = self.gps.ingest_kismet(kdb, recent_window_s, now=now)
                 if fix:
                     stats["gps"] = {"lat": fix.lat, "lon": fix.lon}
                 co = self.gps.score_cotravel(now)
@@ -285,62 +372,27 @@ class RFPluginRunner:
         return stats
 
     def _incident_from_deauth(self, atk: Any, now: float) -> None:
-        sev_map = {
-            "LOW": "watch",
-            "MEDIUM": "watch",
-            "HIGH": "alert",
-            "CRITICAL": "alert",
-        }
-        severity = sev_map.get(getattr(atk, "severity", "MEDIUM"), "watch")
-        target = getattr(atk, "target_mac", "?")
-        attacker = getattr(atk, "attacker_mac", "?")
+        """Emit one deauth detection through the contract (D6).
+
+        Severity/reasons/detail are unchanged from the pre-contract adapter —
+        this is a shape migration, not a behavior change.
+        """
         self.store.observe_incident(
-            event_type="deauth_attack",
-            subject=str(target).upper(),
-            window_label="deauth",
-            severity=severity,
-            session_id=self.store.get_runtime("session_id") or "rf",
-            observed_at=getattr(atk, "last_seen", None) or now,
-            summary=f"deauth {getattr(atk, 'attack_type', 'attack')}",
-            detail={
-                "attacker": str(attacker).upper(),
-                "frames": getattr(atk, "total_frames", 0),
-                "severity_raw": getattr(atk, "severity", ""),
-            },
-            entity_type="wifi_mac",
-            evidence={
-                "reasons": [
-                    f"Deauth/disassoc pattern toward {str(target)[:17]}",
-                    f"type={getattr(atk, 'attack_type', '?')} frames={getattr(atk, 'total_frames', 0)}",
-                    f"source severity={getattr(atk, 'severity', '?')}",
-                ],
-                "kind": "deauth_attack",
-            },
+            **incident_fields(
+                _deauth_result(atk, now),
+                session_id=self.store.get_runtime("session_id") or "rf",
+            )
         )
 
     def _incident_from_rogue(self, al: Any, now: float) -> None:
-        sev_map = {
-            "LOW": "watch",
-            "MEDIUM": "watch",
-            "HIGH": "alert",
-            "CRITICAL": "alert",
-        }
-        severity = sev_map.get(getattr(al, "severity", "HIGH"), "alert")
-        ssid = getattr(al, "ssid", "?")
-        bssid = getattr(al, "rogue_bssid", "?")
-        reasons = list(getattr(al, "reasons", None) or ["Rogue/evil-twin AP detected"])
+        """Emit one rogue-AP detection through the contract (D6).
+
+        Severity/reasons/detail are unchanged from the pre-contract adapter —
+        this is a shape migration, not a behavior change.
+        """
         self.store.observe_incident(
-            event_type="rogue_ap",
-            subject=str(bssid).upper(),
-            window_label="ap",
-            severity=severity,
-            session_id=self.store.get_runtime("session_id") or "rf",
-            observed_at=getattr(al, "timestamp", None) or now,
-            summary="rogue_ap ssid_present",
-            detail={"ssid_len": len(str(ssid)), "reasons": reasons[:5]},
-            entity_type="wifi_ap",
-            evidence={
-                "reasons": reasons[:5],
-                "kind": "rogue_ap",
-            },
+            **incident_fields(
+                _rogue_result(al, now),
+                session_id=self.store.get_runtime("session_id") or "rf",
+            )
         )

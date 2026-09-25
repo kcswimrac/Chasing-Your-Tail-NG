@@ -1,0 +1,58 @@
+{
+  "scenario_version": 1,
+  "scenario_id": "walk-ble-tracker",
+  "description": "City walk past a BLE tracker advertising a tracker-style common name: the BLE detector should score it into the alert band and raise one ble_tracker incident",
+  "session_id": "replay-walk-ble-tracker",
+  "labels": {
+    "kind": "suspicious",
+    "expect": {
+      "detect": true,
+      "state": "alert"
+    }
+  },
+  "config_overrides": {
+    "ble_tracker": {
+      "enabled": true,
+      "min_score": 0.5
+    }
+  },
+  "cycles": [
+    {
+      "cycle_id": 1,
+      "clock_ts": 1700000000.0,
+      "rows": [
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "DD:DD:DD:DD:DD:01",
+            "type": "BTLE Device",
+            "last_time": 1699999995.0,
+            "device": {
+              "kismet.device.base.type": "BTLE Device",
+              "kismet.device.base.commonname": "Tile Tracker"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "cycle_id": 2,
+      "clock_ts": 1700000015.0,
+      "rows": [
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "DD:DD:DD:DD:DD:01",
+            "type": "BTLE Device",
+            "last_time": 1699999995.0,
+            "device": {
+              "kismet.device.base.type": "BTLE Device",
+              "kismet.device.base.commonname": "Tile Tracker"
+            }
+          }
+        }
+      ]
+    },
+    { "cycle_id": 3, "clock_ts": 1700000030.0, "rows": [] }
+  ]
+}

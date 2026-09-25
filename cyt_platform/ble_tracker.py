@@ -12,6 +12,13 @@ import re
 import time
 from typing import Any, List, Optional, Set
 
+from cyt_platform.detectors import (
+    DetectionResult,
+    EvidenceLine,
+    incident_fields,
+    subject_fingerprint,
+)
+
 logger = logging.getLogger(__name__)
 
 # Heuristic name / type tokens (passive detection only)
@@ -93,6 +100,42 @@ def json_dumps_safe(obj) -> str:
         return str(obj)
 
 
+def _ble_result(
+    mac: str,
+    device_data: dict,
+    score: float,
+    reasons: List[str],
+    now: float,
+) -> DetectionResult:
+    """Build the contract result for one BLE tracker detection.
+
+    Pure: no store access. ``confidence`` carries the tracker score — BLE
+    has a real computed score, unlike the capture-scan detectors. Severity
+    mapping is unchanged from the pre-contract engine (>= 0.8 alert).
+    Evidence lines are the tracker_score reasons plus the score line, in
+    the pre-contract order; ``subject_fp`` uses the contract's
+    deterministic fingerprint (the salted-hash value was not stable
+    across processes — locked decision 4).
+    """
+    return DetectionResult(
+        detector="ble",
+        kind="ble_tracker",
+        subject=mac,
+        subject_type="ble_tracker",
+        window_label="ble",
+        severity="alert" if score >= 0.8 else "watch",
+        observed_at=now,
+        summary=f"ble_tracker score={score:.2f}",
+        detail={"score": score, "name": _device_name(device_data)},
+        evidence=tuple(
+            EvidenceLine("ble_signal", reason) for reason in reasons
+        )
+        + (EvidenceLine("score", f"score={score:.2f}"),),
+        confidence=score,
+        subject_fp=subject_fingerprint(mac),
+    )
+
+
 class BLETrackerEngine:
     def __init__(self, store: Any, config: dict):
         self.store = store
@@ -122,22 +165,11 @@ class BLETrackerEngine:
             self.store.upsert_entity(
                 "ble_tracker", mac, now, meta={"score": score, "name": _device_name(dd)}
             )
-            sev = "alert" if score >= 0.8 else "watch"
             self.store.observe_incident(
-                event_type="ble_tracker",
-                subject=mac,
-                window_label="ble",
-                severity=sev,
-                session_id=self.store.get_runtime("session_id") or "ble",
-                observed_at=now,
-                summary=f"ble_tracker score={score:.2f}",
-                detail={"score": score, "name": _device_name(dd)},
-                entity_type="ble_tracker",
-                evidence={
-                    "reasons": reasons + [f"score={score:.2f}"],
-                    "kind": "ble_tracker",
-                    "subject_fp": abs(hash(mac)) % 0xFFFFFFFF,
-                },
+                **incident_fields(
+                    _ble_result(mac, dd, score, reasons, now),
+                    session_id=self.store.get_runtime("session_id") or "ble",
+                )
             )
             hits += 1
         return hits

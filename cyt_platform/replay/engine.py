@@ -22,13 +22,17 @@ for real. The replay keeps the scenario's logical session id across the
 restart because incident keys are session-scoped in the current model;
 the D2 incident model v2 makes keys session-independent.
 
-v1 boundary: device-row detectors (ie fingerprint, BLE, GPS co-travel) are
-disabled and the runner's device pull is empty — the observation-sourced
-device feed arrives with the D6 detector contract migration.
+The fixture DB also feeds the device-row path: the runner's device pull
+reads the same Kismet-shaped fixture read-only with the same row shape as
+the live ``SecureKismetDB`` pull (``last_time >= since_ts``), so BLE
+tracking and GPS co-travel see exactly the rows the live capture would
+return. Device-row detectors stay disabled unless the scenario enables
+them via ``config_overrides``.
 """
 
 from __future__ import annotations
 
+import json
 import shutil
 import tempfile
 from pathlib import Path
@@ -50,8 +54,9 @@ from cyt_platform.replay.scenario import (
     deep_merge,
 )
 
-# Replay runs the alert-path detectors (deauth, rogue) only. Device-row
-# detectors are disabled via config, not by patching the runner.
+# Replay runs every enabled detector against the fixture: the alert scan
+# paths read the alerts table and the device pull reads the devices table,
+# both read-only.
 DEFAULT_REPLAY_CONFIG: Dict[str, Any] = {
     "rf": {"deauth_enabled": True, "rogue_enabled": True},
     "ie_fingerprint": {"enabled": False},
@@ -61,15 +66,57 @@ DEFAULT_REPLAY_CONFIG: Dict[str, Any] = {
 
 
 class _ReplayKismetView:
-    """Minimal kdb stand-in for ``RFPluginRunner.run_cycle``.
+    """Fixture-backed kdb stand-in for ``RFPluginRunner.run_cycle``.
 
-    With device-row detectors disabled the device pull is unused; it stays
-    an explicit empty view rather than relying on the runner's exception
-    fallback. Observation-sourced device rows arrive with D6.
+    Serves the device pull from the scenario's Kismet-shaped fixture DB,
+    read-only, with the same row shape and ``last_time >= since_ts``
+    semantics as the live ``SecureKismetDB`` pull. Only
+    ``get_devices_by_time_range`` is implemented because it is the only
+    method the device-row detectors consume.
+
+    A live capture DB only contains rows up to the current time; the
+    replay fixture holds the whole session at once. ``max_ts`` (set to
+    the cycle clock before each detect stage) reproduces the live bound:
+    rows dated after the cycle clock are not yet visible.
     """
 
+    def __init__(self, db_path: str) -> None:
+        self._db_path = db_path
+        self.max_ts: Optional[float] = None
+
     def get_devices_by_time_range(self, since_ts: float) -> List[dict]:
-        return []
+        from cyt_platform.kismet_ro import connect_readonly
+
+        query = (
+            "SELECT devmac, type, device, last_time FROM devices "
+            "WHERE last_time >= ?"
+        )
+        params: List[Any] = [since_ts]
+        if self.max_ts is not None:
+            query += " AND last_time <= ?"
+            params.append(self.max_ts)
+        query += " ORDER BY rowid"
+
+        conn = connect_readonly(self._db_path)
+        try:
+            rows = conn.execute(query, params).fetchall()
+        finally:
+            conn.close()
+        out: List[dict] = []
+        for devmac, dev_type, device, last_time in rows:
+            try:
+                device_data = json.loads(device) if device else None
+            except (ValueError, TypeError):
+                device_data = None
+            out.append(
+                {
+                    "mac": devmac,
+                    "type": dev_type,
+                    "device_data": device_data,
+                    "last_time": last_time,
+                }
+            )
+        return out
 
 
 # Scenario fault injection: component -> RFPluginRunner attribute. A fault
@@ -160,11 +207,17 @@ class ReplayEngine:
             summaries: List[Dict[str, Any]] = []
             try:
                 runner = self._build_runner(store)
+                # Built once after the fixture is populated; read-only and
+                # stateless, so it survives simulated restarts unchanged.
+                kdb = _ReplayKismetView(str(fixture.path))
                 for cycle in self.scenario.cycles:
                     self.clock.set(cycle.clock_ts)
+                    # Rows dated after this cycle's clock are not yet visible
+                    # (a live capture cannot contain rows from the future).
+                    kdb.max_ts = cycle.clock_ts
                     recorded = self._ingest_cycle(store, cycle)
                     self._apply_faults(runner, cycle.cycle_id)
-                    stats = self._detect(store, runner, fixture)
+                    stats = self._detect(store, runner, kdb, fixture)
                     state = self._compose_cycle_state(store, stats)
                     self._close_stale(store)
                     summaries.append(
@@ -252,13 +305,15 @@ class ReplayEngine:
         return None
 
     def _detect(
-        self, store: Any, runner: Any, fixture: KismetFixture
+        self, store: Any, runner: Any, kdb: Any, fixture: KismetFixture
     ) -> Dict[str, Any]:
         # Same transaction shape as the service loop: watermark writes commit
-        # atomically with the incidents derived from the same scan.
+        # atomically with the incidents derived from the same scan. The runner
+        # owns every detector, including the gps fusion; its pull window now
+        # shares the runner's injected clock.
         with store.transaction():
             return runner.run_cycle(
-                _ReplayKismetView(),
+                kdb,
                 str(fixture.path),
                 now=self.clock.now(),
             )
