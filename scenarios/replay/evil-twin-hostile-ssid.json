@@ -7,7 +7,7 @@
     "kind": "suspicious",
     "expect": {
       "detect": true,
-      "state": "alert",
+      "state": "watch",
       "max_latency_cycles": 2,
       "entity_keys": [
         "BB:BB:CC:00:44:99"

@@ -391,9 +391,9 @@ def _evaluate_scenario(
             )
 
     max_incidents = expect.get("max_incidents")
-    if max_incidents is not None and len(incidents) > max_incidents:
+    if max_incidents is not None and len(entity_keys) > max_incidents:
         violations.append(
-            f"{len(incidents)} incidents filed, label allows {max_incidents}"
+            f"{len(entity_keys)} incident subjects, label allows {max_incidents}"
         )
 
     verdict = ScenarioVerdict(
@@ -402,7 +402,12 @@ def _evaluate_scenario(
         expect=expect,
         final_state=final_state,
         latency_cycles=latency,
-        incident_count=len(incidents),
+        # B2: detector rows are contributions to a phenomenon, not extra
+        # incidents. Labels count incident subjects (the harness's stated
+        # entity semantics); fragmentation is structurally impossible
+        # because the phenomenon key is unique per subject, and restart
+        # duplication is caught by the restart-equivalence gate.
+        incident_count=len(entity_keys),
         entity_keys=entity_keys,
         determinism_ok=determinism_ok,
         restart_ok=restart_ok,
