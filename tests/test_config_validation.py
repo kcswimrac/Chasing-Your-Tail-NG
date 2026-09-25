@@ -431,11 +431,12 @@ def test_unknown_nested_key_rejected():
 
 
 def test_known_extra_keys_are_not_flagged():
-    # incidents_v2 and the GPS dropout knobs are consumed by code though
-    # absent from DEFAULTS — they must validate, not reject.
+    # incidents_v2 thresholds and the GPS dropout knobs are consumed by
+    # code though absent from DEFAULTS — they must validate, not reject.
+    # (The engine is always on now; the obsolete "enabled" key is rejected.)
     cfg = overridden(
         **{
-            "incidents_v2": {"enabled": True},
+            "incidents_v2": {"watch_confidence": 0.30},
             "gps_fusion": {**DEFAULTS["gps_fusion"], "dropout_seconds": 900.0},
         }
     )

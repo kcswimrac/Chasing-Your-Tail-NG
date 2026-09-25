@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from conftest import escalate_lifecycle
 from cyt_platform.store import CytStore
 
 
@@ -88,26 +89,28 @@ def test_get_status_inputs_hold_filter(store: CytStore):
     session = store.begin_session()
     now = time.time()
     with store.transaction():
+        # Detector rows are contributions (B2): severity alone contributes
+        # no threat counts.
         store.observe_incident(
             event_type="mac_reappear",
-            subject="AA:00:00:00:00:01",
-            window_label="5-10",
-            severity="watch",
-            session_id=session,
-            observed_at=now - 10,
-            summary="recent watch",
-        )
-        store.observe_incident(
-            event_type="mac_reappear",
-            subject="AA:00:00:00:00:02",
+            subject="AA:00:00:00:00:03",
             window_label="15-20",
             severity="alert",
             session_id=session,
-            observed_at=now - 400,  # outside 300s hold
-            summary="stale alert",
+            observed_at=now - 10,
+            summary="detector contribution",
         )
-        store.write_heartbeat("analyzer", ok=True, cycle=1, detail="ok")
+    with store.transaction():
+        escalate_lifecycle(
+            store, "AA:00:00:00:00:01", now - 10, "watch", session_id=session
+        )
+    with store.transaction():
+        escalate_lifecycle(
+            store, "AA:00:00:00:00:02", now - 400, "alert", session_id=session
+        )
+    store.write_heartbeat("analyzer", ok=True, cycle=1, detail="ok")
     inputs = store.get_status_inputs(hold_seconds=300)
+    # Lifecycle rows inside the hold window count; the stale alert does not.
     assert inputs.watch_open == 1
     assert inputs.alert_open == 0
     assert inputs.alert_open_total == 1

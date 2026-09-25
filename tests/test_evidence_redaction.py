@@ -29,6 +29,7 @@ from pathlib import Path
 
 import pytest
 
+from conftest import escalate_lifecycle
 from cyt_platform.detectors import DetectionResult, EvidenceLine, incident_fields
 from cyt_platform.fused_evidence import attach as attach_fusion
 from cyt_platform.fused_evidence import fused_evidence, render_confidence_block
@@ -329,6 +330,10 @@ def test_status_json_written_evidence_is_inert(tmp_path):
             store.write_heartbeat("analyzer", ok=True, cycle=1)
         now = time.time()
         _seed_hostile_incident(store, now)
+        # B2: detector rows no longer drive status — escalate the
+        # phenomenon so the evidence window is hot (watch/alert state).
+        with store.transaction():
+            escalate_lifecycle(store, "AA:BB:CC:DD:EE:FF", now, "watch")
         engine = StatusEngine(store, config)
         snap = engine.publish(
             cycle=1,

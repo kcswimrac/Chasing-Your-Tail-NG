@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from conftest import escalate_lifecycle
 from cyt_platform import deauth_detector, rogue_ap_detector
 from cyt_platform.kismet_ro import connect_readonly
 from cyt_platform.rf_plugins import (
@@ -397,15 +398,8 @@ def test_threat_states_outrank_degraded(status_env):
     sid = store.begin_session()
     now = time.time()
     with store.transaction():
-        store.observe_incident(
-            event_type="mac_reappear",
-            subject="AA:BB:CC:DD:EE:42",
-            window_label="15-20",
-            severity="alert",
-            session_id=sid,
-            observed_at=now,
-            summary="a",
-        )
+        # B2: threat comes from the lifecycle row, not the detector row.
+        escalate_lifecycle(store, "AA:BB:CC:DD:EE:42", now, "alert", session_id=sid)
         store.write_heartbeat("analyzer", ok=True, cycle=1)
     snap = engine.publish(
         detector_failures={"detector:rogue": "RuntimeError: x"},

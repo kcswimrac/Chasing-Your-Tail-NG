@@ -1281,7 +1281,7 @@ class CytStore:
             """
             SELECT i.id, i.incident_key, i.event_type, i.window_label,
                    i.severity, i.session_id, i.first_seen, i.last_seen,
-                   i.summary, i.evidence_json, i.updated_seq,
+                   i.summary, i.evidence_json, i.updated_seq, i.suppressed,
                    e.entity_type, e.key AS entity_key
             FROM incidents i JOIN entities e ON e.id = i.entity_id
             WHERE i.updated_seq > ?
@@ -1337,11 +1337,15 @@ class CytStore:
     def get_status_inputs(self, hold_seconds: float) -> StatusInputs:
         now = time.time()
         hold_cutoff = now - hold_seconds
-        # Threat counts exclude suppressed
+        # B2: status derives from lifecycle rows only. Detector-owned rows
+        # (lifecycle_state IS NULL) carry static severity and are evidence
+        # contributions — they never own threat level. The engine's own
+        # writes keep severity in sync with state (SEVERITY_FOR_STATE), so
+        # counting the lifecycle state is the authoritative source.
         watch_open = self.conn.execute(
             """
             SELECT COUNT(*) AS c FROM incidents
-            WHERE status='open' AND severity='watch' AND last_seen >= ?
+            WHERE status='open' AND lifecycle_state='watch' AND last_seen >= ?
               AND COALESCE(suppressed, 0)=0
             """,
             (hold_cutoff,),
@@ -1349,7 +1353,7 @@ class CytStore:
         alert_open = self.conn.execute(
             """
             SELECT COUNT(*) AS c FROM incidents
-            WHERE status='open' AND severity='alert' AND last_seen >= ?
+            WHERE status='open' AND lifecycle_state='alert' AND last_seen >= ?
               AND COALESCE(suppressed, 0)=0
             """,
             (hold_cutoff,),
@@ -1357,13 +1361,15 @@ class CytStore:
         watch_total = self.conn.execute(
             """
             SELECT COUNT(*) AS c FROM incidents
-            WHERE status='open' AND severity='watch' AND COALESCE(suppressed, 0)=0
+            WHERE status='open' AND lifecycle_state='watch'
+              AND COALESCE(suppressed, 0)=0
             """
         ).fetchone()["c"]
         alert_total = self.conn.execute(
             """
             SELECT COUNT(*) AS c FROM incidents
-            WHERE status='open' AND severity='alert' AND COALESCE(suppressed, 0)=0
+            WHERE status='open' AND lifecycle_state='alert'
+              AND COALESCE(suppressed, 0)=0
             """
         ).fetchone()["c"]
         suppressed_open = self.conn.execute(
