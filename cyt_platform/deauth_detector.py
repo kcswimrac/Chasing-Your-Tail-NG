@@ -97,6 +97,15 @@ class DeauthDetector:
         self.catchup_window_seconds = float(
             deauth_config.get('catchup_window_seconds', 1800)
         )
+        # Attack classification window: events older than this are pruned
+        # from memory, so severity reflects recent frame rates rather than
+        # process lifetime — and a restarted process (cold event list)
+        # classifies like a long-lived one. Keep it <=
+        # catchup_window_seconds (the deepest look-back any process can
+        # read) so in-memory state and fresh-process state converge.
+        self.attack_window_seconds = float(
+            deauth_config.get('attack_window_seconds', 1800)
+        )
 
         # Protected devices (your own MACs to watch)
         self.protected_macs = set(
@@ -172,8 +181,14 @@ class DeauthDetector:
             self.last_scan_error = f"scan_error: {e}"
             logger.error("Error scanning for deauth events: %s", e)
 
-        # Deduplicate by timestamp+target+source
-        seen = set()
+        # Deduplicate by timestamp+target+source — within this scan AND
+        # against remembered events: an untrusted-watermark re-read (clock
+        # jump corrected, see kismet_ro) must not double-count events
+        # already in memory, or windowed severity would inflate.
+        seen = {
+            (round(e.timestamp, 1), e.target_mac, e.source_mac)
+            for e in self.events
+        }
         unique_events = []
         for event in new_events:
             key = (round(event.timestamp, 1), event.target_mac, event.source_mac)
@@ -182,6 +197,7 @@ class DeauthDetector:
                 unique_events.append(event)
 
         self.events.extend(unique_events)
+        self._prune_events(time.time() if now is None else float(now))
 
         # Watermark advances on clean scans only; a failed scan must not
         # skip past data it could not read.
@@ -192,6 +208,20 @@ class DeauthDetector:
 
         logger.info(f"Deauth scan found {len(unique_events)} new events")
         return unique_events
+
+    def _prune_events(self, now: float) -> None:
+        """Drop events older than the attack window.
+
+        analyze_attacks() rebuilds the attack list from this list every
+        cycle; without a bound, a long quiet tail keeps old events alive
+        for the process lifetime, so severity escalates on total history
+        and every cycle re-files the same stale attack (close/reopen
+        churn, restart-divergent counts). Pruning to the attack window
+        makes classification a function of recent frame rates that a
+        restarted process reproduces from a cold list.
+        """
+        cutoff = now - self.attack_window_seconds
+        self.events = [e for e in self.events if e.timestamp >= cutoff]
 
     def _scan_alerts_table(
         self, conn: sqlite3.Connection, now: Optional[float] = None

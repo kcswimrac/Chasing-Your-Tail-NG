@@ -1,0 +1,88 @@
+{
+  "scenario_version": 1,
+  "scenario_id": "clock-jump-attack-recovers",
+  "description": "Kismet's host clock runs about an hour fast and is corrected mid-session. The fast-clock period leaves one alert below the attack threshold — just enough to push the persisted watermark ahead of the analyzer's clock. When the clock is corrected, an attack lands in real time: an untrusted (far-ahead) watermark must fall back to the bounded catch-up window so detection resumes immediately, and the clock anomaly must not silently hide it.",
+  "session_id": "replay-clock-jump-attack-recovers",
+  "labels": {
+    "kind": "edge",
+    "expect": {
+      "detect": true,
+      "state": "watch",
+      "max_latency_cycles": 2,
+      "entity_keys": [
+        "AA:BB:CC:00:00:43"
+      ],
+      "max_incidents": 1
+    }
+  },
+  "config_overrides": {
+    "deauth_detection": {
+      "min_events_for_attack": 2
+    }
+  },
+  "cycles": [
+    {
+      "cycle_id": 1,
+      "clock_ts": 1701003660.0,
+      "rows": [
+        {
+          "source": "kismet.alerts",
+          "row": {
+            "ts_sec": 1701003655.0,
+            "header": "DEAUTH",
+            "json": {
+              "kismet.alert.header": "DEAUTH",
+              "kismet.alert.text": "Detected deauthentication attack",
+              "kismet.alert.source_mac": "AA:BB:CC:0D:00:77",
+              "kismet.alert.dest_mac": "AA:BB:CC:00:00:71",
+              "kismet.alert.channel": 11
+            },
+            "src_mac": "AA:BB:CC:0D:00:77",
+            "dst_mac": "AA:BB:CC:00:00:71",
+            "bssid": ""
+          }
+        }
+      ]
+    },
+    {
+      "cycle_id": 2,
+      "clock_ts": 1701000120.0,
+      "rows": [
+        {
+          "source": "kismet.alerts",
+          "row": {
+            "ts_sec": 1701000115.0,
+            "header": "DEAUTH",
+            "json": {
+              "kismet.alert.header": "DEAUTH",
+              "kismet.alert.text": "Detected deauthentication attack",
+              "kismet.alert.source_mac": "AA:BB:CC:0D:00:77",
+              "kismet.alert.dest_mac": "AA:BB:CC:00:00:43",
+              "kismet.alert.channel": 6
+            },
+            "src_mac": "AA:BB:CC:0D:00:77",
+            "dst_mac": "AA:BB:CC:00:00:43",
+            "bssid": ""
+          }
+        },
+        {
+          "source": "kismet.alerts",
+          "row": {
+            "ts_sec": 1701000118.0,
+            "header": "DEAUTH",
+            "json": {
+              "kismet.alert.header": "DEAUTH",
+              "kismet.alert.text": "Detected deauthentication attack",
+              "kismet.alert.source_mac": "AA:BB:CC:0D:00:77",
+              "kismet.alert.dest_mac": "AA:BB:CC:00:00:43",
+              "kismet.alert.channel": 6
+            },
+            "src_mac": "AA:BB:CC:0D:00:77",
+            "dst_mac": "AA:BB:CC:00:00:43",
+            "bssid": ""
+          }
+        }
+      ]
+    }
+  ]
+}

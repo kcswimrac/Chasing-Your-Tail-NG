@@ -162,6 +162,12 @@ DEFAULTS: Dict[str, Any] = {
         "burst_threshold": 10,
         "burst_window_seconds": 60,
         "min_events_for_attack": 5,
+        # B4: events older than this are pruned from the analyzer's memory
+        # and excluded from attack classification, so severity tracks recent
+        # frame rates — never process lifetime — and a restarted process
+        # classifies like a long-lived one. Keep it <=
+        # catchup_window_seconds (the deepest look-back any scan can read).
+        "attack_window_seconds": 1800,
         "protected_macs": [],
     },
     "rogue_ap_detection": {
@@ -685,6 +691,10 @@ def validate_config(cfg: dict) -> None:
     _num(
         cfg, errors, "deauth_detection.min_events_for_attack",
         ok=lambda n: n >= 1, desc=">= 1 (events)",
+    )
+    _num(
+        cfg, errors, "deauth_detection.attack_window_seconds",
+        ok=lambda n: n > 0, desc="> 0 (seconds)",
     )
     _str_list(cfg, errors, "deauth_detection.protected_macs")
     _bool(cfg, errors, "rogue_ap_detection.enabled")

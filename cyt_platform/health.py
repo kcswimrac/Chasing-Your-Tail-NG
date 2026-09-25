@@ -22,6 +22,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Dict, Optional
 
+from cyt_platform.kismet_ro import WATERMARK_SKEW_ALLOWANCE_S
+
 # Components whose failure means reduced detection. The aggregate
 # "detectors" component in status.json stays derived from this prefix.
 DETECTOR_PREFIX = "detector:"
@@ -64,6 +66,35 @@ def gps_dropout_reason(
         # than fabricate a failure.
         return None
     return GPS_DROPOUT if age > dropout_seconds else None
+
+
+# Reason code for the ``clock`` component: a watermark or captured event is
+# stamped ahead of the analyzer's own clock by more than the skew allowance.
+CLOCK_AHEAD = "clock_ahead"
+
+
+def clock_skew_reason(
+    *,
+    watermark: Optional[float],
+    newest_event_ts: Optional[float],
+    now: float,
+    skew_allowance_s: float = WATERMARK_SKEW_ALLOWANCE_S,
+) -> Optional[str]:
+    """Reason the ``clock`` component is failing, or None when healthy.
+
+    Pure function of the suspect timestamps and the scenario clock (locked
+    decision 4). A persisted watermark or a captured event stamped more
+    than ``skew_allowance_s`` ahead of ``now`` means the capture's clock
+    and the analyzer's clock disagree; detection over such a skew cannot
+    be trusted, so it must be visible rather than silently applied.
+    """
+    ahead = 0.0
+    for ts in (watermark, newest_event_ts):
+        if ts is not None and ts - now > ahead:
+            ahead = ts - now
+    if ahead <= skew_allowance_s:
+        return None
+    return CLOCK_AHEAD
 
 
 @dataclass
