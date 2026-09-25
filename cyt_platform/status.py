@@ -16,9 +16,50 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from cyt_platform.privacy import chmod_private_file, ensure_dir
+from cyt_platform.health import ComponentFailureRegistry
 from cyt_platform.store import CytStore, StatusInputs
 
 logger = logging.getLogger(__name__)
+
+
+def compose_state(
+    *,
+    component_fail: bool,
+    deaf_fail_is_fail: bool,
+    analyzer_err: bool,
+    kismet_db_ok: bool,
+    fail_reason: Optional[str],
+    threat_level: int,
+    quiet_watch: bool,
+    detector_failures: Dict[str, str],
+) -> tuple:
+    """The one state ladder: fail > alert > watch > degraded > clear.
+
+    Pure so the replay engine (D6 detector_failure scenario) evaluates the
+    exact same composition as StatusEngine.publish — one ladder, no drift.
+    ``deaf_fail_is_fail`` and ``quiet_watch`` arrive pre-combined with their
+    config gates; ``detector_failures`` is the registry's component->reason
+    map. Returns (state, reason).
+    """
+    if component_fail or deaf_fail_is_fail:
+        return (
+            "fail",
+            fail_reason
+            or (
+                "deaf" if deaf_fail_is_fail
+                else "analyzer_error" if analyzer_err
+                else "kismet_db" if not kismet_db_ok
+                else "component_fail"
+            ),
+        )
+    if threat_level >= 2:
+        return "alert", "open_alert_incidents"
+    if threat_level >= 1 or quiet_watch:
+        return "watch", "quiet_rf" if quiet_watch and threat_level == 0 else "open_watch_incidents"
+    if detector_failures:
+        # A failing detector means we cannot see; "clear" would be a lie.
+        return "degraded", "detector_failures: " + ", ".join(sorted(detector_failures))
+    return "clear", "healthy"
 
 
 @dataclass
@@ -55,6 +96,7 @@ class StatusEngine:
         force_fail: bool = False,
         fail_reason: Optional[str] = None,
         detector_failures: Optional[Dict[str, str]] = None,
+        component_registry: Optional[ComponentFailureRegistry] = None,
     ) -> dict:
         hold = float(self.status_cfg.get("hold_seconds") or 300)
         stale_s = float(self.status_cfg.get("stale_seconds") or 150)
@@ -63,6 +105,15 @@ class StatusEngine:
         quiet_is_watch = bool(self.status_cfg.get("quiet_is_watch", False))
 
         detector_failures = detector_failures or {}
+        if component_registry is not None:
+            # D6: the registry is the live record — its entries win over a
+            # stats snapshot of the same map taken earlier in the cycle.
+            detector_failures = {
+                **detector_failures,
+                **component_registry.failures(),
+            }
+        else:
+            detector_failures = dict(detector_failures)
 
         inputs: StatusInputs = self.store.get_status_inputs(hold)
         now = inputs.now
@@ -116,27 +167,16 @@ class StatusEngine:
         else:
             threat_level = 0
 
-        if component_fail or (deaf_fail and deaf_is_fail):
-            state = "fail"
-            reason = fail_reason or (
-                "deaf" if deaf_fail and deaf_is_fail else
-                "analyzer_error" if consecutive_fails or not analyzer_ok else
-                "kismet_db" if not kismet_db_ok else
-                "component_fail"
-            )
-        elif threat_level >= 2:
-            state = "alert"
-            reason = "open_alert_incidents"
-        elif threat_level >= 1 or quiet_watch:
-            state = "watch"
-            reason = "quiet_rf" if quiet_watch and threat_level == 0 else "open_watch_incidents"
-        elif detector_failures:
-            # A failing detector means we cannot see; "clear" would be a lie.
-            state = "degraded"
-            reason = "detector_failures: " + ", ".join(sorted(detector_failures))
-        else:
-            state = "clear"
-            reason = "healthy"
+        state, reason = compose_state(
+            component_fail=component_fail,
+            deaf_fail_is_fail=deaf_fail and deaf_is_fail,
+            analyzer_err=(consecutive_fails > 0 or not analyzer_ok),
+            kismet_db_ok=kismet_db_ok,
+            fail_reason=fail_reason,
+            threat_level=threat_level,
+            quiet_watch=quiet_watch,
+            detector_failures=detector_failures,
+        )
 
         # Invariants when not fail:
         # clear <=> both open counts 0; alert if alert_open>=1; watch if watch only
@@ -200,6 +240,16 @@ class StatusEngine:
         if self.status_cfg.get("expose_total_opens"):
             snapshot["counts"]["watch_open_total"] = inputs.watch_open_total
             snapshot["counts"]["alert_open_total"] = inputs.alert_open_total
+
+        # D6: per-component health from the failure registry (e.g.
+        # "detector:deauth", "gps", "rf_runner"). Registry names are
+        # namespaced/owned components; core components composed above
+        # (analyzer, kismet_db, ...) always keep the engine's own reading —
+        # a registry entry may add a component, never rewrite one.
+        if component_registry is not None:
+            for name, entry in component_registry.components().items():
+                if name not in snapshot["components"]:
+                    snapshot["components"][name] = entry
 
         # Explainable top hits (fingerprints + reasons only)
         try:

@@ -12,6 +12,7 @@ import time
 from typing import Any, Callable, Dict, Optional
 
 from cyt_platform.privacy import sanitize_error
+from cyt_platform.health import ComponentFailureRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -49,17 +50,24 @@ def _runtime_watermark_saver(
 
 
 class RFPluginRunner:
-    def __init__(self, store: Any, config: dict):
+    def __init__(
+        self,
+        store: Any,
+        config: dict,
+        registry: Optional[ComponentFailureRegistry] = None,
+    ):
         self.store = store
         self.config = config
+        # D6: failures report into one per-component registry (shared with
+        # status composition when the host supplies one).
+        self.registry = (
+            registry if registry is not None else ComponentFailureRegistry()
+        )
         self.deauth = None
         self.rogue = None
         self.ie = None
         self.ble = None
         self.gps = None
-        # Last failure per plugin component, e.g.
-        # "detector:deauth" -> "sqlite3.OperationalError: ..." (sanitized).
-        self._failures: Dict[str, str] = {}
         self._init_plugins()
 
     def _init_plugins(self) -> None:
@@ -79,7 +87,9 @@ class RFPluginRunner:
                 )
             except Exception as e:
                 logger.warning("DeauthDetector unavailable: %s", e)
-                self._failures["detector:deauth"] = f"init: {sanitize_error(e)}"
+                self.registry.record_failure(
+                    "detector:deauth", f"init: {sanitize_error(e)}"
+                )
         if rf.get("rogue_enabled", True):
             try:
                 from rogue_ap_detector import RogueAPDetector
@@ -95,7 +105,9 @@ class RFPluginRunner:
                 )
             except Exception as e:
                 logger.warning("RogueAPDetector unavailable: %s", e)
-                self._failures["detector:rogue"] = f"init: {sanitize_error(e)}"
+                self.registry.record_failure(
+                    "detector:rogue", f"init: {sanitize_error(e)}"
+                )
         if (self.config.get("ie_fingerprint") or {}).get("enabled", True):
             from cyt_platform.ie_fingerprint import IEFingerprintEngine
 
@@ -109,17 +121,19 @@ class RFPluginRunner:
 
             self.gps = LiveGpsFusion(self.store, self.config)
 
-    def _record_failure(self, component: str, exc: Exception) -> str:
+    def _record_failure(
+        self, component: str, exc: Exception, ts: Optional[float] = None
+    ) -> str:
         detail = sanitize_error(exc)
-        self._failures[component] = detail
+        self.registry.record_failure(component, detail, ts)
         return detail
 
-    def _clear_failure(self, component: str) -> None:
-        self._failures.pop(component, None)
+    def _clear_failure(self, component: str, ts: Optional[float] = None) -> None:
+        self.registry.record_success(component, ts)
 
     def failures(self) -> Dict[str, str]:
         """Component name -> sanitized failure detail; empty when all healthy."""
-        return dict(self._failures)
+        return self.registry.failures()
 
     def run_cycle(
         self,
@@ -153,25 +167,25 @@ class RFPluginRunner:
                     stats["gps"] = {"lat": fix.lat, "lon": fix.lon}
                 co = self.gps.score_cotravel(now)
                 stats["cotravel"] = len(co)
-                self._clear_failure("gps")
+                self._clear_failure("gps", now)
             except Exception as e:
-                detail = self._record_failure("gps", e)
+                detail = self._record_failure("gps", e, ts=now)
                 logger.warning("gps fusion error: %s", detail)
 
         # IE + BLE on same device set
         if self.ie:
             try:
                 stats["ie_links"] = self.ie.process_devices(devices, now)
-                self._clear_failure("detector:ie")
+                self._clear_failure("detector:ie", now)
             except Exception as e:
-                detail = self._record_failure("detector:ie", e)
+                detail = self._record_failure("detector:ie", e, ts=now)
                 logger.warning("ie fingerprint error: %s", detail)
         if self.ble:
             try:
                 stats["ble_hits"] = self.ble.process_devices(devices, now)
-                self._clear_failure("detector:ble")
+                self._clear_failure("detector:ble", now)
             except Exception as e:
-                detail = self._record_failure("detector:ble", e)
+                detail = self._record_failure("detector:ble", e, ts=now)
                 logger.warning("ble tracker error: %s", detail)
 
         # Deauth / rogue — use file path APIs from CM5 modules
@@ -191,11 +205,11 @@ class RFPluginRunner:
                 # that as a plugin failure too so status cannot read clear.
                 scan_err = getattr(self.deauth, "last_scan_error", None)
                 if scan_err:
-                    self._failures.setdefault("detector:deauth", scan_err)
+                    self.registry.record_failure("detector:deauth", scan_err, now)
                 else:
-                    self._clear_failure("detector:deauth")
+                    self._clear_failure("detector:deauth", now)
             except Exception as e:
-                detail = self._record_failure("detector:deauth", e)
+                detail = self._record_failure("detector:deauth", e, ts=now)
                 logger.warning("deauth scan error: %s", detail)
 
         if self.rogue:
@@ -209,16 +223,16 @@ class RFPluginRunner:
                     self._incident_from_rogue(al, now)
                 scan_err = getattr(self.rogue, "last_scan_error", None)
                 if scan_err:
-                    self._failures.setdefault("detector:rogue", scan_err)
+                    self.registry.record_failure("detector:rogue", scan_err, now)
                 else:
-                    self._clear_failure("detector:rogue")
+                    self._clear_failure("detector:rogue", now)
             except Exception as e:
-                detail = self._record_failure("detector:rogue", e)
+                detail = self._record_failure("detector:rogue", e, ts=now)
                 logger.warning("rogue scan error: %s", detail)
 
         # Live failure map rides with the cycle stats so the service can hand
         # it straight to status composition (never clear while failing).
-        stats["detector_failures"] = dict(self._failures)
+        stats["detector_failures"] = self.registry.failures()
         return stats
 
     def _incident_from_deauth(self, atk: Any, now: float) -> None:

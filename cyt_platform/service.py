@@ -14,6 +14,7 @@ from secure_database import SecureKismetDB
 from cyt_platform import notify
 from cyt_platform.baseline import BaselineEngine, resolve_place
 from cyt_platform.config import ensure_runtime_dirs, load_json
+from cyt_platform.health import ComponentFailureRegistry
 from cyt_platform.kismet_resolve import KismetDbResolver
 from cyt_platform.logging_setup import setup_logging
 from cyt_platform.monitor_adapter import build_monitor
@@ -145,7 +146,10 @@ def run(
     resolver = KismetDbResolver((config.get("paths") or {}).get("kismet_logs", "*.kismet"))
     status = StatusEngine(store, config)
     seal_every = int(store_cfg.get("seal_every_cycles") or 10)
-    rf = RFPluginRunner(store, config)
+    # D6: one failure registry per session — every detector and sensing
+    # component reports into it, and status composition renders it.
+    health_registry = ComponentFailureRegistry()
+    rf = RFPluginRunner(store, config, registry=health_registry)
     push = PushQueue(store, config)
     prev_state = "fail"
     last_gps_place = place_id
@@ -290,6 +294,7 @@ def run(
                     kismet_db_ok=True,
                     kismet_proc_ok=proc_ok,
                     detector_failures=rf_stats.get("detector_failures"),
+                    component_registry=health_registry,
                 )
                 # P2 push on escalation transitions
                 try:
