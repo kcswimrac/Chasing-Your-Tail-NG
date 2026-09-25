@@ -190,10 +190,11 @@ def test_ble_result_maps_detection_to_contract():
     assert result.subject == "DD:DD:DD:DD:DD:01"
     assert result.severity == "alert"  # score >= 0.8
     assert result.summary == "ble_tracker score=0.80"
-    assert result.detail == {
-        "score": 0.8,
-        "name": "Tile Tracker",
-    }
+    # B3: stored detail carries the stable redacted token, never the raw
+    # device name (detail_json reaches status evidence and `incident show`).
+    assert result.detail["score"] == 0.8
+    assert result.detail["name"].startswith("ssid(len=12,h=")
+    assert "Tile Tracker" not in json.dumps(result.detail)
     assert result.confidence == 0.8
     assert result.subject_fp == subject_fingerprint("DD:DD:DD:DD:DD:01")
     assert [line.kind for line in result.evidence] == [

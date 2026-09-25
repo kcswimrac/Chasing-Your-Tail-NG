@@ -18,6 +18,7 @@ from cyt_platform.detectors import (
     incident_fields,
     subject_fingerprint,
 )
+from cyt_platform.privacy import redact_subject
 from cyt_platform.fused_evidence import attach as attach_fusion
 
 logger = logging.getLogger(__name__)
@@ -80,7 +81,9 @@ def tracker_score(device: dict, device_data: dict) -> tuple[float, List[str]]:
     name = _device_name(device_data)
     if TRACKER_NAME_RE.search(name):
         score += 0.55
-        reasons.append(f"name/manuf matches tracker pattern ({name[:40]})")
+        # B3: reasons are status/push/report surfaces — never interpolate
+        # the raw device name; emit the stable redacted token.
+        reasons.append(f"name/manuf matches tracker pattern ({redact_subject(name, 'ssid')})")
     # Apple Continuity / Find My often use specific company IDs — if present in JSON
     blob = json_dumps_safe(device_data).lower()
     if "find my" in blob or "findmy" in blob or "continuity" in blob:
@@ -127,7 +130,12 @@ def _ble_result(
         severity="alert" if score >= 0.8 else "watch",
         observed_at=now,
         summary=f"ble_tracker score={score:.2f}",
-        detail={"score": score, "name": _device_name(device_data)},
+        detail={
+            "score": score,
+            # B3: detail dicts reach incident show/store reads — carry the
+            # redacted token, never the raw name (the token is stable).
+            "name": redact_subject(_device_name(device_data), "ssid"),
+        },
         evidence=tuple(
             EvidenceLine("ble_signal", reason) for reason in reasons
         )

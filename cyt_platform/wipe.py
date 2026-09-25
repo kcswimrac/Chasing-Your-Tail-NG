@@ -62,6 +62,10 @@ def wipe_inventory(config: dict) -> List[Path]:
         candidates.append(log_dir / "analyzer.log")
         for p in log_dir.glob("analyzer.log.*"):
             candidates.append(p)
+        # S8: end-of-day debriefs render evidence and entity keys —
+        # they are wipe-scoped like every other log_dir artifact.
+        for p in log_dir.glob("debrief_*.md"):
+            candidates.append(p)
 
     # LED state
     runtime = Path(paths_cfg.get("runtime_dir") or "data/run")

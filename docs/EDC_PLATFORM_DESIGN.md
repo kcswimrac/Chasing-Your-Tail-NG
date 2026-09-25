@@ -1021,7 +1021,7 @@ Atomic write: write `/run/cyt/status.json.tmp` → `os.replace` → mode **0640*
 }
 ```
 
-**Privacy:** status never includes raw MAC/SSID lists — counts and component health only. `path_basename` not full home paths.
+**Privacy:** status carries no raw MAC/SSID/device-name text — MACs render as `AA:BB:xx:xx:xx:FF`, SSIDs and device names as stable `ssid(len=N,h=XXXX)` tokens redacted at the detector source; counts and component health only alongside those redacted reason lines. `path_basename` not full home paths.
 
 **Surfaces:** (1) status.json primary; (2) optional HTTP **disabled by default** (`PR-0.7`); bind `127.0.0.1` only + unit test dual-stack; (3) systemd notify.
 

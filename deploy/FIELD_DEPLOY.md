@@ -50,7 +50,11 @@ python -m cyt_platform --self-check -c /etc/cyt/config.json
 | alert | red blink |
 | fail  | red solid |
 
-`status.json` never includes raw MAC/SSID lists — counts and component health only.
+`status.json` carries no raw MAC, SSID, or device-name text. Identity is
+redacted at the detector source: MACs render as `AA:BB:xx:xx:xx:FF`
+(OUI + last octet), SSIDs and device names as stable
+`ssid(len=N,h=XXXX)` tokens; evidence is counts + component health plus
+those redacted reason lines.
 
 ## Encryption + panic wipe (P1)
 

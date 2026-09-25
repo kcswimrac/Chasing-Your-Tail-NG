@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from cyt_platform.privacy import redact_evidence_text
+from cyt_platform.privacy import redact_evidence_text, redact_subject
 
 
 def _day_bounds(day: Optional[str] = None) -> tuple[float, float, str]:
@@ -213,6 +213,11 @@ def generate_debrief(
             key = r.get("entity_key", "?")
             if isinstance(key, str) and key.startswith("enc:v1:"):
                 key = f"enc…{key[-8:]}"
+            else:
+                # S8: the debrief is a written, wipe-scoped artifact — a
+                # plaintext entity key (raw MAC, SSID key, fingerprint
+                # hash) renders as its stable redacted token.
+                key = redact_subject(str(key))
             lines.append(
                 f"- `{r['entity_type']}` locs={r['locs']} sees={r['sees']} key={key}"
             )
