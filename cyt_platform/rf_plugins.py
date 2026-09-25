@@ -205,7 +205,7 @@ class RFPluginRunner:
         # GPS + co-travel
         if self.gps:
             try:
-                fix = self.gps.ingest_kismet(kdb, recent_window_s)
+                fix = self.gps.ingest_kismet(kdb, recent_window_s, now=now)
                 if fix:
                     stats["gps"] = {"lat": fix.lat, "lon": fix.lon}
                 co = self.gps.score_cotravel(now)

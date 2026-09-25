@@ -236,17 +236,24 @@ class LiveGpsFusion:
         # failure — a silent drop here would be an invisible blind spot.
         self.store.record_observation(**rec)
 
-    def ingest_kismet(self, kdb: Any, recent_window_s: float = 120.0) -> Optional[GpsFix]:
+    def ingest_kismet(
+        self, kdb: Any, recent_window_s: float = 120.0, now: Optional[float] = None
+    ) -> Optional[GpsFix]:
         """Pull located devices + the operator fix for this cycle.
 
         Records one ``gps_fix`` observation for the operator fix and one
         ``wifi_device`` observation per located device. Device location
         sightings are keyed by haversine place id. Returns the operator
-        fix, or None when no located fix exists this cycle.
+        fix, or None when no located fix exists this cycle. ``now`` is the
+        caller's cycle clock — injected by replay so the pull window is
+        scenario time; wall clock when omitted (live path unchanged).
         """
         if not self.enabled:
             return None
-        now = time.time()
+        if now is None:
+            now = time.time()
+        else:
+            now = float(now)
         self._cycle_counter += 1
         try:
             devices = kdb.get_devices_by_time_range(now - recent_window_s)
