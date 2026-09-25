@@ -232,3 +232,86 @@ def test_validation_rejects_bad_restart_cycle(tmp_path):
     }
     with pytest.raises(ScenarioError, match="restart"):
         load_scenario(str(write_scenario(tmp_path, doc)))
+
+
+# --- D6 detector_failure: a dead detector is never "no threat" ------------------
+
+
+def test_detector_failure_scenario_degrades_but_never_detects(tmp_path):
+    """The detector_failure scenario: the deauth detector fails every cycle
+    while the air is quiet. The replay must read degraded every cycle —
+    never clean, never "no threat" — and open no incidents (detect=false)."""
+    report = run_scenario(SCENARIOS / "detector_failure.json", tmp_path)
+    assert report["labels"]["expect"] == {"detect": False, "state": "degraded"}
+    assert report["incidents"] == []
+    assert len(report["cycles"]) == 3
+    for cycle in report["cycles"]:
+        assert cycle["state"] == "degraded"
+        assert cycle["state"] != "clear"
+        failed = cycle["detection"]["detector_failures"]
+        assert "detector:deauth" in failed
+        assert "fault_injected" in failed["detector:deauth"]
+    # The failure survives the mid-scenario restart (fault re-applied to
+    # the rebuilt runner) — degraded is not a boot-time artifact.
+    assert report["cycles"][-1]["state"] == "degraded"
+    assert report["restarts"] == [2]
+
+
+def test_report_state_matches_expect_state_labels(tmp_path):
+    """Per-cycle state is composed with the production ladder; the existing
+    scenarios' expect.state labels hold on the final cycle."""
+    for name, expected in (
+        ("commute-quiet.json", "clear"),
+        ("commute-deauth-burst.json", "watch"),
+        ("cafe-evil-twin.json", "alert"),
+    ):
+        report = run_scenario(SCENARIOS / name, tmp_path / name)
+        assert report["cycles"][-1]["state"] == expected, name
+
+
+def test_fault_activates_from_declared_cycle(tmp_path):
+    """A fault is dormant before its from_cycle: cycle 1 runs healthy and
+    reads clear; the faulting cycles read degraded."""
+    doc = {
+        "scenario_version": 1,
+        "scenario_id": "fault-late",
+        "labels": {"expect": {"detect": False}},
+        "faults": [
+            {"component": "detector:rogue", "from_cycle": 2, "error": "late_fault"}
+        ],
+        "cycles": [
+            {"cycle_id": 1, "clock_ts": 1700000000.0, "rows": []},
+            {"cycle_id": 2, "clock_ts": 1700000015.0, "rows": []},
+        ],
+    }
+    report = run_scenario(
+        write_scenario(tmp_path, doc), tmp_path / "late"
+    )
+    assert report["cycles"][0]["state"] == "clear"
+    assert report["cycles"][1]["state"] == "degraded"
+    assert (
+        report["cycles"][1]["detection"]["detector_failures"]["detector:rogue"]
+        == "RuntimeError: fault_injected: late_fault"
+    )
+
+
+def test_validation_rejects_unknown_fault_component(tmp_path):
+    doc = {
+        "scenario_version": 1,
+        "scenario_id": "x",
+        "faults": [{"component": "detector:cellular", "from_cycle": 1}],
+        "cycles": [{"cycle_id": 1, "clock_ts": 1.0, "rows": []}],
+    }
+    with pytest.raises(ScenarioError, match="replayable"):
+        load_scenario(str(write_scenario(tmp_path, doc)))
+
+
+def test_validation_rejects_fault_from_unknown_cycle(tmp_path):
+    doc = {
+        "scenario_version": 1,
+        "scenario_id": "x",
+        "faults": [{"component": "detector:deauth", "from_cycle": 9}],
+        "cycles": [{"cycle_id": 1, "clock_ts": 1.0, "rows": []}],
+    }
+    with pytest.raises(ScenarioError, match="fault"):
+        load_scenario(str(write_scenario(tmp_path, doc)))

@@ -48,6 +48,12 @@ from typing import Any, Dict, List, Optional, Tuple
 
 REPLAY_SCENARIO_VERSION = 1
 
+# Replayable fault components (D6 detector_failure scenario): a fault makes
+# the named detector's scan raise through the runner's real failure path.
+FAULT_DETECTOR_DEAUTH = "detector:deauth"
+FAULT_DETECTOR_ROGUE = "detector:rogue"
+REPLAYABLE_FAULT_COMPONENTS = (FAULT_DETECTOR_DEAUTH, FAULT_DETECTOR_ROGUE)
+
 # Sources a scenario row may carry; same source names the D1 normalizer
 # stores on observations.
 SOURCE_KISMET_DEVICES = "kismet.devices"
@@ -71,6 +77,7 @@ _TOP_LEVEL_KEYS = frozenset(
         "config_overrides",
         "close_after_seconds",
         "restarts",
+        "faults",
         "cycles",
     }
 )
@@ -97,6 +104,21 @@ class ScenarioCycle:
 
 
 @dataclass(frozen=True)
+class ScenarioFault:
+    """A deterministic detector failure injected from cycle N onward.
+
+    The engine routes the fault through the production failure path (the
+    detector's scan raises; the runner registers it), so the scenario proves
+    what status composition does with a failing detector — never a faked
+    stat.
+    """
+
+    component: str
+    from_cycle: int
+    error: str = "scan_error"
+
+
+@dataclass(frozen=True)
 class ScenarioDocument:
     scenario_id: str
     session_id: str
@@ -106,6 +128,7 @@ class ScenarioDocument:
     close_after_seconds: float
     restarts: Tuple[int, ...]  # restart after completing cycle N
     cycles: Tuple[ScenarioCycle, ...]
+    faults: Tuple[ScenarioFault, ...] = ()
 
 
 def _require_mapping(value: Any, where: str) -> Dict[str, Any]:
@@ -235,6 +258,35 @@ def scenario_from_dict(doc: Any) -> ScenarioDocument:
             )
         restarts.append(r)
 
+    raw_faults = doc_map.get("faults") or []
+    if not isinstance(raw_faults, list):
+        raise ScenarioError("faults must be an array")
+    faults: List[ScenarioFault] = []
+    for i, f in enumerate(raw_faults):
+        f_map = _require_mapping(f, f"faults[{i}]")
+        unknown = set(f_map) - {"component", "from_cycle", "error"}
+        if unknown:
+            raise ScenarioError(f"faults[{i}] has unknown keys: {sorted(unknown)}")
+        component = _nonempty_str(f_map.get("component"), f"faults[{i}].component")
+        if component not in REPLAYABLE_FAULT_COMPONENTS:
+            raise ScenarioError(
+                f"faults[{i}].component '{component}' is not a replayable "
+                f"detector (replay runs {list(REPLAYABLE_FAULT_COMPONENTS)})"
+            )
+        from_cycle = f_map.get("from_cycle")
+        if isinstance(from_cycle, bool) or not isinstance(from_cycle, int):
+            raise ScenarioError(f"faults[{i}].from_cycle must be an integer")
+        if from_cycle not in seen_ids:
+            raise ScenarioError(
+                f"faults[{i}].from_cycle {from_cycle} does not match any "
+                f"cycle_id (faults reference cycle_id values)"
+            )
+        error = f_map.get("error") or "scan_error"
+        error = _nonempty_str(error, f"faults[{i}].error")
+        faults.append(
+            ScenarioFault(component=component, from_cycle=from_cycle, error=error)
+        )
+
     return ScenarioDocument(
         scenario_id=scenario_id,
         session_id=session_id,
@@ -244,6 +296,7 @@ def scenario_from_dict(doc: Any) -> ScenarioDocument:
         close_after_seconds=close_after_f,
         restarts=tuple(sorted(restarts)),
         cycles=cycles,
+        faults=tuple(faults),
     )
 
 

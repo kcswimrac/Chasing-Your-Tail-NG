@@ -39,12 +39,14 @@ from cyt_platform.replay.clock import ReplayClock
 from cyt_platform.replay.fixture import KismetFixture
 from cyt_platform.replay.report import build_report
 from cyt_platform.replay.scenario import (
+    REPLAYABLE_FAULT_COMPONENTS,
     SOURCE_BLE,
     SOURCE_GPS,
     SOURCE_KISMET_ALERTS,
     SOURCE_KISMET_DEVICES,
     ScenarioCycle,
     ScenarioDocument,
+    ScenarioError,
     deep_merge,
 )
 
@@ -67,6 +69,29 @@ class _ReplayKismetView:
     """
 
     def get_devices_by_time_range(self, since_ts: float) -> List[dict]:
+        return []
+
+
+# Scenario fault injection: component -> RFPluginRunner attribute. A fault
+# replaces the detector with a proxy whose scan raises, so failures travel
+# the production path (runner registers -> stats map -> state composition).
+_FAULT_ATTRS = {
+    "detector:deauth": "deauth",
+    "detector:rogue": "rogue",
+}
+
+
+class _FailingDetector:
+    """Detector proxy that fails every scan with a deterministic error."""
+
+    def __init__(self, error: str):
+        self._error = error
+        self.last_scan_error = None
+
+    def scan_kismet_db(self, db_path: str, now: Optional[float] = None) -> List[dict]:
+        raise RuntimeError(f"fault_injected: {self._error}")
+
+    def analyze_attacks(self) -> List[dict]:
         return []
 
 
@@ -125,6 +150,7 @@ class ReplayEngine:
             if restarts is not None
             else self.scenario.restarts
         )
+        self._validate_faults()
         fixture = KismetFixture(self.store_path.parent / "kismet_fixture.db")
         try:
             fixture.write_rows(
@@ -137,7 +163,9 @@ class ReplayEngine:
                 for cycle in self.scenario.cycles:
                     self.clock.set(cycle.clock_ts)
                     recorded = self._ingest_cycle(store, cycle)
+                    self._apply_faults(runner, cycle.cycle_id)
                     stats = self._detect(store, runner, fixture)
+                    state = self._compose_cycle_state(store, stats)
                     self._close_stale(store)
                     summaries.append(
                         {
@@ -145,6 +173,7 @@ class ReplayEngine:
                             "clock_ts": cycle.clock_ts,
                             "observations_recorded": len(recorded),
                             "detection": stats,
+                            "state": state,
                         }
                     )
                     if cycle.cycle_id in points:
@@ -239,3 +268,60 @@ class ReplayEngine:
             store.close_stale_incidents(
                 self.clock.now(), self.scenario.close_after_seconds
             )
+
+    # --- faults + state (D6 detector_failure scenario) ---
+
+    def _validate_faults(self) -> None:
+        """Fail fast on faults the replay cannot route (named error, at load)."""
+        for fault in self.scenario.faults:
+            if fault.component not in REPLAYABLE_FAULT_COMPONENTS:
+                raise ScenarioError(
+                    f"fault component '{fault.component}' is not a replayable "
+                    f"detector (replay runs {list(REPLAYABLE_FAULT_COMPONENTS)})"
+                )
+
+    def _apply_faults(self, runner: Any, cycle_id: int) -> None:
+        """Activate declared faults for this cycle (idempotent; from_cycle N
+        onward). Re-applied after restarts because the runner is rebuilt."""
+        for fault in self.scenario.faults:
+            if fault.from_cycle > cycle_id:
+                continue
+            attr = _FAULT_ATTRS[fault.component]
+            if not isinstance(getattr(runner, attr, None), _FailingDetector):
+                setattr(runner, attr, _FailingDetector(fault.error))
+
+    def _compose_cycle_state(self, store: Any, stats: Dict[str, Any]) -> str:
+        """Compose this cycle's state with the production status ladder.
+
+        Open-incident counts are read with read-only SQL (same pattern as
+        report.py — no incident read API exists yet); staleness is already
+        handled by ``close_stale_incidents`` on the scenario clock, so no
+        hold window applies. No wall clock is read.
+        """
+        from cyt_platform.status import compose_state
+
+        rows = store.conn.execute(
+            """
+            SELECT severity, COUNT(*) AS c FROM incidents
+            WHERE status='open' AND COALESCE(suppressed, 0)=0
+            GROUP BY severity
+            """
+        ).fetchall()
+        by_severity = {r["severity"]: r["c"] for r in rows}
+        threat_level = 2 if by_severity.get("alert") else (
+            1 if by_severity.get("watch") else 0
+        )
+        # Replay v1 composes the detection surface only: the fixture DB and
+        # analyzer are healthy by construction, so component_fail/deaf are
+        # always False — detector failures carry the degraded signal.
+        state, _reason = compose_state(
+            component_fail=False,
+            deaf_fail_is_fail=False,
+            analyzer_err=False,
+            kismet_db_ok=True,
+            fail_reason=None,
+            threat_level=threat_level,
+            quiet_watch=False,
+            detector_failures=stats.get("detector_failures") or {},
+        )
+        return state
