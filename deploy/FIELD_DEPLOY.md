@@ -61,7 +61,9 @@ those redacted reason lines.
 ```bash
 # Generate store key (once)
 sudo python -m cyt_platform --init-store-key /etc/cyt/store.key
-sudo chown root:cyt /etc/cyt/store.key && sudo chmod 0640 /etc/cyt/store.key
+# Owner-only (0600): the service refuses to start on a group/world-readable
+# key file (fail-closed key hygiene).
+sudo chown root:cyt /etc/cyt/store.key && sudo chmod 0600 /etc/cyt/store.key
 # config.edc.json already has store.encryption.enabled=true and key_file path
 
 # Panic wipe (device lost / seize risk)
