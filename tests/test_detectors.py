@@ -36,6 +36,71 @@ def make_result(**overrides):
     return DetectionResult(**kwargs)
 
 
+# --- capture-scan adapters (rf_plugins) ------------------------------------------
+
+
+def _deauth_attack(**overrides):
+    from types import SimpleNamespace
+
+    kwargs = {
+        "target_mac": "AA:BB:CC:00:00:42",
+        "attacker_mac": "de:ad:be:ef:00:01",
+        "attack_type": "deauth_flood",
+        "total_frames": 27,
+        "severity": "HIGH",
+        "last_seen": 1699999994.0,
+    }
+    kwargs.update(overrides)
+    return SimpleNamespace(**kwargs)
+
+
+def test_deauth_result_maps_attack_to_contract():
+    from cyt_platform.rf_plugins import _deauth_result
+
+    result = _deauth_result(_deauth_attack(), now=1700000000.0)
+    assert result.detector == "deauth"
+    assert result.kind == "deauth_attack"
+    assert result.subject == "AA:BB:CC:00:00:42"
+    assert result.subject_type == "wifi_mac"
+    assert result.window_label == "deauth"
+    assert result.severity == "alert"
+    assert result.observed_at == 1699999994.0
+    assert result.detail == {
+        "attacker": "DE:AD:BE:EF:00:01",
+        "frames": 27,
+        "severity_raw": "HIGH",
+    }
+    assert [line.kind for line in result.evidence] == [
+        "deauth_pattern",
+        "attack_signature",
+        "source_severity",
+    ]
+    assert result.confidence is None
+
+
+def test_deauth_result_severity_and_clock_fallbacks():
+    from cyt_platform.rf_plugins import _deauth_result
+
+    result = _deauth_result(
+        _deauth_attack(severity="LOW", last_seen=0.0), now=1700000000.0
+    )
+    assert result.severity == "watch"
+    # Falsy last_seen falls back to the cycle clock (pre-contract behavior).
+    assert result.observed_at == 1700000000.0
+
+
+def test_deauth_result_reasons_are_the_precontract_strings():
+    from cyt_platform.rf_plugins import _deauth_result
+
+    result = _deauth_result(_deauth_attack(), now=1700000000.0)
+    fields = incident_fields(result, session_id="s")
+    assert fields["evidence"]["reasons"] == [
+        "Deauth/disassoc pattern toward AA:BB:CC:00:00:42",
+        "type=deauth_flood frames=27",
+        "source severity=HIGH",
+    ]
+
+
 # --- validation ---------------------------------------------------------------
 
 
