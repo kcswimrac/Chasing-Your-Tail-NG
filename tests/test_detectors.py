@@ -219,6 +219,65 @@ def test_ble_result_reasons_match_precontract_order():
     assert fields["evidence"]["reasons"] == reasons + ["score=0.60"]
 
 
+def test_cotravel_result_maps_score_to_contract():
+    from cyt_platform.gps_live import _cotravel_result
+
+    detail = {"locations": 2, "span_hours": 0.02, "sees": 5, "operator_visits": []}
+    result = _cotravel_result(
+        "AA:BB:CC:00:00:99", locs=2, score=0.33, detail=detail, now=1700000060.0
+    )
+    assert result.detector == "cotravel"
+    assert result.kind == "cotravel"
+    assert result.subject == "AA:BB:CC:00:00:99"
+    assert result.window_label == "multi-loc"
+    assert result.severity == "watch"  # score < 0.75
+    assert result.summary == "cotravel score=0.33 locs=2"
+    assert result.detail == detail
+    assert result.confidence == 0.33
+    assert [line.kind for line in result.evidence] == [
+        "copresence",
+        "travel_span",
+        "score",
+    ]
+
+
+def test_cotravel_result_alert_band_and_fingerprint():
+    import hashlib
+
+    from cyt_platform.gps_live import _cotravel_result
+
+    result = _cotravel_result(
+        "AA:BB:CC:00:00:99",
+        locs=3,
+        score=0.9,
+        detail={"span_hours": 0.02},
+        now=1700000060.0,
+    )
+    assert result.severity == "alert"  # score >= 0.75
+    # Pre-contract fingerprint preserved: sha1 hexdigest prefix, same
+    # computation the pre-contract adapter used.
+    assert result.subject_fp == int(
+        hashlib.sha1(b"AA:BB:CC:00:00:99").hexdigest()[:8], 16
+    )
+
+
+def test_cotravel_result_reasons_are_the_precontract_strings():
+    from cyt_platform.detectors import incident_fields
+    from cyt_platform.gps_live import _cotravel_result
+
+    detail = {"locations": 2, "span_hours": 0.02, "sees": 5, "operator_visits": []}
+    result = _cotravel_result(
+        "AA:BB:CC:00:00:99", locs=2, score=0.33, detail=detail, now=1700000060.0
+    )
+    fields = incident_fields(result, session_id="s")
+    assert fields["evidence"]["reasons"] == [
+        "Co-located with the operator at 2 distinct places",
+        "co-travel span 0.02h",
+        "score=0.33",
+    ]
+    assert fields["evidence"]["kind"] == "cotravel"
+
+
 # --- validation ---------------------------------------------------------------
 
 

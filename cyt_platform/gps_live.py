@@ -17,6 +17,11 @@ import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
+from cyt_platform.detectors import (
+    DetectionResult,
+    EvidenceLine,
+    incident_fields,
+)
 from cyt_platform.location import (
     DEFAULT_DENSITY_WINDOW_S,
     DEFAULT_MERGE_RADIUS_M,
@@ -35,6 +40,46 @@ logger = logging.getLogger(__name__)
 # How far back co-travel scoring looks for observations. Co-travel is a
 # multi-place relationship, not a single-cycle event.
 COTRAVEL_LOOKBACK_S = 6 * 3600.0
+
+
+def _cotravel_result(
+    key: str,
+    locs: int,
+    score: float,
+    detail: dict,
+    now: float,
+) -> DetectionResult:
+    """Build the contract result for one high-confidence co-travel score.
+
+    Pure: no store access. Severity mapping, reason strings, and the
+    subject fingerprint are unchanged from the pre-contract engine
+    (including its deterministic sha1-based fingerprint). ``confidence``
+    carries the co-travel score — co-travel has a real computed score,
+    unlike the capture-scan detectors.
+    """
+    return DetectionResult(
+        detector="cotravel",
+        kind="cotravel",
+        subject=key,
+        subject_type="wifi_mac",
+        window_label="multi-loc",
+        severity="alert" if score >= 0.75 else "watch",
+        observed_at=now,
+        summary=f"cotravel score={score:.2f} locs={locs}",
+        detail=detail,
+        evidence=(
+            EvidenceLine(
+                "copresence",
+                f"Co-located with the operator at {locs} distinct places",
+            ),
+            EvidenceLine(
+                "travel_span", f"co-travel span {detail['span_hours']}h"
+            ),
+            EvidenceLine("score", f"score={score:.2f}"),
+        ),
+        confidence=score,
+        subject_fp=int(hashlib.sha1(key.encode("utf-8")).hexdigest()[:8], 16),
+    )
 
 
 @dataclass
@@ -468,27 +513,10 @@ class LiveGpsFusion:
             # Raise durable incident for high co-travel
             if score >= float(self.cfg.get("incident_score_threshold") or 0.55):
                 self.store.observe_incident(
-                    event_type="cotravel",
-                    subject=key,
-                    window_label="multi-loc",
-                    severity="alert" if score >= 0.75 else "watch",
-                    session_id=self.store.get_runtime("session_id") or "gps",
-                    observed_at=now,
-                    summary=f"cotravel score={score:.2f} locs={locs}",
-                    detail=detail,
-                    entity_type="wifi_mac",
-                    evidence={
-                        "reasons": [
-                            f"Co-located with the operator at {locs} distinct places",
-                            f"co-travel span {detail['span_hours']}h",
-                            f"score={score:.2f}",
-                        ],
-                        "kind": "cotravel",
-                        # stable digest, not hash(): replay determinism
-                        "subject_fp": int(
-                            hashlib.sha1(key.encode("utf-8")).hexdigest()[:8], 16
-                        ),
-                    },
+                    **incident_fields(
+                        _cotravel_result(key, locs, score, detail, now),
+                        session_id=self.store.get_runtime("session_id") or "gps",
+                    )
                 )
         results.sort(key=lambda x: x["score"], reverse=True)
         return results
