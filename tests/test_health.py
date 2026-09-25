@@ -333,7 +333,7 @@ class FakeGps:
         self.fixes = list(fixes or [])
         self.last_fix = None
 
-    def ingest_kismet(self, kdb, recent_window_s=120.0):
+    def ingest_kismet(self, kdb, recent_window_s=120.0, now=None):
         if self.fixes:
             self.last_fix = self.fixes.pop(0)
             return self.last_fix
