@@ -319,3 +319,211 @@ def deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]
         else:
             out[key] = value
     return out
+
+
+# ---------------------------------------------------------------------------
+# B6: store-to-scenario export — make live alerts replayable.
+# ---------------------------------------------------------------------------
+
+# Reconstruction notes, per source. The exporter rebuilds the raw source rows
+# the D1 normalizers accept from the whitelisted observation payloads, so a
+# replayed export re-runs the production normalizers and detectors on the
+# same values the live service saw:
+#   - kismet.devices: devmac/type/last_time plus the whitelisted device JSON
+#     fields (signal, channel, frequency, commonname, manuf). Probe-SSID text
+#     is not persisted (privacy whitelist keeps only the count), so the
+#     reconstructed device JSON carries no SSID lists — detection that reads
+#     them cannot be reproduced from an export by design.
+#   - kismet.alerts: the deauth scan resolves attacker/victim from the alert
+#     JSON's MAC fields; those are preserved in the payload and rebuilt into
+#     the exported ``json`` blob, so deauth detection round-trips exactly.
+#   - gps: lat/lon/ts/accuracy_m survive as columns on the observation.
+#   - ble: mac/ts plus the advertised name, rssi, and company id the tracker
+#     scores on.
+_EXPORT_ALERT_JSON_KEYS = (
+    ("source_mac", "kismet.alert.source_mac"),
+    ("dest_mac", "kismet.alert.dest_mac"),
+    ("channel", "kismet.alert.channel"),
+)
+
+
+def _device_row_from_payload(
+    identity_key: str, ts: float, payload: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Rebuild a kismet.devices-shaped row from a whitelisted payload."""
+    device: Dict[str, Any] = {}
+    if payload.get("rssi") is not None:
+        device["kismet.device.base.signal"] = {
+            "kismet.common.signal.last_signal": payload["rssi"]
+        }
+    for payload_key, device_key in (
+        ("channel", "kismet.device.base.channel"),
+        ("frequency", "kismet.device.base.frequency"),
+        ("commonname", "kismet.device.base.commonname"),
+        ("manuf", "kismet.device.base.manuf"),
+    ):
+        if payload.get(payload_key) is not None:
+            device[device_key] = payload[payload_key]
+    row: Dict[str, Any] = {
+        "devmac": identity_key,
+        "last_time": ts,
+        "device": device,
+    }
+    if payload.get("device_type") is not None:
+        row["type"] = payload["device_type"]
+    return row
+
+
+def _alert_row_from_payload(
+    ts: float, payload: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Rebuild a kismet.alerts-shaped row from a whitelisted payload."""
+    alert_json: Dict[str, Any] = {}
+    if payload.get("header"):
+        alert_json["kismet.alert.header"] = payload["header"]
+    if payload.get("text"):
+        alert_json["kismet.alert.text"] = payload["text"]
+    for payload_key, json_key in _EXPORT_ALERT_JSON_KEYS:
+        if payload.get(payload_key) is not None:
+            alert_json[json_key] = payload[payload_key]
+    row: Dict[str, Any] = {"ts_sec": ts, "json": alert_json}
+    for col_key in ("header", "src_mac", "dst_mac", "bssid"):
+        if payload.get(col_key) is not None:
+            row[col_key] = payload[col_key]
+    return row
+
+
+def _scenario_rows_for_observation(obs: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Map one persisted observation to its v1 scenario row shape."""
+    source = obs.get("source")
+    payload = obs.get("payload") or {}
+    ts = float(obs["ts"])
+    if source == SOURCE_GPS:
+        fix: Dict[str, Any] = {"lat": obs["lat"], "lon": obs["lon"], "ts": ts}
+        if obs.get("accuracy_m") is not None:
+            fix["accuracy_m"] = obs["accuracy_m"]
+        return [{"source": SOURCE_GPS, "fix": fix}]
+    if source == SOURCE_BLE:
+        ble_row: Dict[str, Any] = {"mac": obs["identity_key"], "ts": ts}
+        for key in ("name", "rssi", "company_id"):
+            if payload.get(key) is not None:
+                ble_row[key] = payload[key]
+        return [{"source": SOURCE_BLE, "row": ble_row}]
+    if source == SOURCE_KISMET_ALERTS:
+        return [
+            {"source": SOURCE_KISMET_ALERTS, "row": _alert_row_from_payload(ts, payload)}
+        ]
+    if source == SOURCE_KISMET_DEVICES:
+        return [
+            {
+                "source": SOURCE_KISMET_DEVICES,
+                "row": _device_row_from_payload(obs["identity_key"], ts, payload),
+            }
+        ]
+    # Unknown source: never invent a shape — drop with the caller informed
+    # via the export summary (the observation itself stays authoritative).
+    return []
+
+
+def _row_clock_ts(row: Dict[str, Any]) -> float:
+    """The source timestamp of an exported scenario row (its cycle clock bound)."""
+    if row.get("fix"):
+        return float(row["fix"].get("ts") or 0.0)
+    payload = row.get("row") or {}
+    return float(payload.get("ts_sec") or payload.get("ts") or payload.get("last_time") or 0.0)
+
+
+def scenario_from_observations(
+    store: Any,
+    *,
+    since_ts: Optional[float] = None,
+    until_ts: Optional[float] = None,
+    scenario_id: Optional[str] = None,
+    description: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Build a v1 scenario document from persisted observations (B6).
+
+    Groups the store's observations by their cycle_id (the live analysis
+    cycle that recorded them), one scenario cycle per live cycle with
+    ``clock_ts`` at the newest row it contains — the bound a live capture
+    held when that cycle ran. Rows are ordered deterministically, so the
+    same store content always exports to a byte-identical document.
+
+    Fidelity follows the observation payload whitelist (see the notes at
+    the module top of this section): deauth alert and BLE detection data
+    survive exactly; probe-SSID text was never persisted. Detection that
+    depends on operator-supplied config (trusted APs, protected MACs) must
+    be re-supplied via ``config_overrides`` on the exported document.
+    """
+    params: List[Any] = []
+    where = ""
+    if since_ts is not None:
+        where += " AND ts >= ?"
+        params.append(float(since_ts))
+    if until_ts is not None:
+        where += " AND ts <= ?"
+        params.append(float(until_ts))
+    rows = store.conn.execute(
+        """
+        SELECT id, ts, source, kind, identity_key, cycle_id, session_id,
+               lat, lon, accuracy_m, payload_json
+        FROM observations
+        WHERE 1=1"""
+        + where
+        + " ORDER BY ts, id",
+        params,
+    ).fetchall()
+
+    sessions = {r["session_id"] for r in rows if r["session_id"]}
+    session_id = sorted(sessions)[0] if sessions else "exported"
+    cycle_map: Dict[int, List[Dict[str, Any]]] = {}
+    row_count = 0
+    unmapped = 0
+    for r in rows:
+        obs_row: Dict[str, Any] = dict(r)
+        if r["payload_json"]:
+            try:
+                obs_row["payload"] = json.loads(r["payload_json"])
+            except (ValueError, TypeError):
+                obs_row["payload"] = {}
+        else:
+            obs_row["payload"] = {}
+        scenario_rows = _scenario_rows_for_observation(obs_row)
+        if not scenario_rows:
+            # Unknown source: never invent a shape — the observation stays
+            # authoritative, the export just cannot reproduce it.
+            unmapped += 1
+            continue
+        cycle_map.setdefault(int(r["cycle_id"]), []).extend(scenario_rows)
+        row_count += len(scenario_rows)
+
+    cycles: List[Dict[str, Any]] = []
+    for cycle_id in sorted(cycle_map):
+        group = cycle_map[cycle_id]
+        clock_ts = max(_row_clock_ts(row) for row in group)
+        cycles.append(
+            {
+                "cycle_id": cycle_id,
+                "clock_ts": clock_ts,
+                "rows": group,
+            }
+        )
+
+    description = description or (
+        f"Exported from live store session {session_id}: "
+        f"{row_count} rows over {len(cycles)} cycles"
+    )
+    if unmapped:
+        description += f"; {unmapped} observation(s) had no replayable shape and were dropped"
+
+    doc: Dict[str, Any] = {
+        "scenario_version": REPLAY_SCENARIO_VERSION,
+        "scenario_id": scenario_id or f"export-{session_id}",
+        "session_id": f"replay-{session_id}",
+        "description": description,
+        "labels": {},
+        "config_overrides": {},
+        "cycles": cycles,
+    }
+    return doc
+

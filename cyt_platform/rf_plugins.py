@@ -18,6 +18,7 @@ from cyt_platform.detectors import (
     incident_fields,
 )
 from cyt_platform.fused_evidence import attach as attach_fusion
+from cyt_platform.observations import CycleObsIndex, attach_obs_ids
 from cyt_platform.privacy import sanitize_error
 from cyt_platform.health import (
     GPS_DROPOUT_DEFAULT_SECONDS,
@@ -178,6 +179,8 @@ class RFPluginRunner:
         self.ie = None
         self.ble = None
         self.gps = None
+        # B6: per-cycle provenance index; set by run_cycle from the host.
+        self._obs_index: Optional[CycleObsIndex] = None
         self._init_plugins()
 
     def _init_plugins(self) -> None:
@@ -283,10 +286,14 @@ class RFPluginRunner:
         db_path: str,
         recent_window_s: float = 120.0,
         now: Optional[float] = None,
+        obs_index: Optional[CycleObsIndex] = None,
     ) -> Dict[str, Any]:
         # Injected clock (replay, locked decision 4): the wall clock is read
         # only when the host does not supply a scenario time.
         now = time.time() if now is None else float(now)
+        # B6: per-cycle provenance index over the observations the service
+        # ingested this cycle; the evidence builders below cite its ids.
+        self._obs_index = obs_index
         stats: Dict[str, Any] = {
             "deauth_events": 0,
             "rogue_alerts": 0,
@@ -318,7 +325,7 @@ class RFPluginRunner:
                 fix = self.gps.ingest_kismet(kdb, recent_window_s, now=now)
                 if fix:
                     stats["gps"] = {"lat": fix.lat, "lon": fix.lon}
-                co = self.gps.score_cotravel(now)
+                co = self.gps.score_cotravel(now, obs_index=self._obs_index)
                 stats["cotravel"] = len(co)
                 # D6: exception-free dropout (no located fix) is its own
                 # degraded component — a dead GPS feed must be visible.
@@ -336,14 +343,18 @@ class RFPluginRunner:
         # them (B5); their health carries over untouched.
         if self.ie and pull_ok:
             try:
-                stats["ie_links"] = self.ie.process_devices(devices, now)
+                stats["ie_links"] = self.ie.process_devices(
+                    devices, now, obs_index=self._obs_index
+                )
                 self._clear_failure("detector:ie", now)
             except Exception as e:
                 detail = self._record_failure("detector:ie", e, ts=now)
                 logger.warning("ie fingerprint error: %s", detail)
         if self.ble and pull_ok:
             try:
-                stats["ble_hits"] = self.ble.process_devices(devices, now)
+                stats["ble_hits"] = self.ble.process_devices(
+                    devices, now, obs_index=self._obs_index
+                )
                 self._clear_failure("detector:ble", now)
             except Exception as e:
                 detail = self._record_failure("detector:ble", e, ts=now)
@@ -447,27 +458,69 @@ class RFPluginRunner:
 
         Severity/reasons/detail are unchanged from the pre-contract adapter —
         this is a shape migration, not a behavior change. D4: the incident's
-        evidence additionally carries the fused why/against block.
+        evidence additionally carries the fused why/against block. B6: every
+        evidence line cites the alert observations recorded this cycle for
+        the attack's events — the capture rows that produced it.
         """
         result = _deauth_result(atk, now)
+        result = self._obs_ids_from_attack(result, atk)
         fields = incident_fields(
             result,
             session_id=self.store.get_runtime("session_id") or "rf",
         )
         attach_fusion(fields, result)
         self.store.observe_incident(**fields)
+
+    def _obs_ids_from_attack(self, result: Any, atk: Any) -> Any:
+        """Fill the result's empty obs_ids from the cycle's alert observations.
+
+        No index (replay, or a cycle whose ingest failed) ships evidence
+        without provenance rather than with wrong provenance.
+        """
+        index = self._obs_index
+        if index is None:
+            return result
+        obs_ids: List[int] = []
+        for event in getattr(atk, "events", None) or []:
+            ts = getattr(event, "timestamp", None)
+            if ts is None:
+                continue
+            obs_ids.extend(
+                index.ids_for_alert_ts(
+                    ts,
+                    (
+                        getattr(event, "source_mac", None),
+                        getattr(event, "target_mac", None),
+                    ),
+                )
+            )
+        return attach_obs_ids(result, sorted(set(obs_ids)))
 
     def _incident_from_rogue(self, al: Any, now: float) -> None:
         """Emit one rogue-AP detection through the contract (D6).
 
         Severity/reasons/detail are unchanged from the pre-contract adapter —
         this is a shape migration, not a behavior change. D4: the incident's
-        evidence additionally carries the fused why/against block.
+        evidence additionally carries the fused why/against block. B6: the
+        evidence cites this cycle's observations of the rogue BSSID (device
+        rows and/or the alert row that raised it).
         """
         result = _rogue_result(al, now)
+        index = self._obs_index
+        if index is not None:
+            obs_ids = list(
+                index.ids_for_identity(getattr(al, "rogue_bssid", "") or "")
+            ) + list(
+                index.ids_for_alert_ts(
+                    getattr(al, "timestamp", None) or 0.0,
+                    (getattr(al, "rogue_bssid", None),),
+                )
+            )
+            result = attach_obs_ids(result, sorted(set(obs_ids)))
         fields = incident_fields(
             result,
             session_id=self.store.get_runtime("session_id") or "rf",
         )
         attach_fusion(fields, result)
         self.store.observe_incident(**fields)
+

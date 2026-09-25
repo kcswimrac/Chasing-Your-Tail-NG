@@ -20,6 +20,7 @@ from cyt_platform.detectors import (
 )
 from cyt_platform.privacy import redact_subject
 from cyt_platform.fused_evidence import attach as attach_fusion
+from cyt_platform.observations import CycleObsIndex, attach_obs_ids
 
 logger = logging.getLogger(__name__)
 
@@ -153,7 +154,12 @@ class BLETrackerEngine:
         self.min_score = float(self.cfg.get("min_score") or 0.5)
         self._seen: Set[str] = set()
 
-    def process_devices(self, devices: List[dict], now: Optional[float] = None) -> int:
+    def process_devices(
+        self,
+        devices: List[dict],
+        now: Optional[float] = None,
+        obs_index: Optional[CycleObsIndex] = None,
+    ) -> int:
         if not self.enabled:
             return 0
         now = now or time.time()
@@ -175,6 +181,10 @@ class BLETrackerEngine:
                 "ble_tracker", mac, now, meta={"score": score, "name": _device_name(dd)}
             )
             result = _ble_result(mac, dd, score, reasons, now)
+            # B6: cite this cycle's device observations for the tracker —
+            # the capture rows that produced the sighting.
+            if obs_index is not None:
+                result = attach_obs_ids(result, obs_index.ids_for_identity(mac))
             fields = incident_fields(
                 result,
                 session_id=self.store.get_runtime("session_id") or "ble",
