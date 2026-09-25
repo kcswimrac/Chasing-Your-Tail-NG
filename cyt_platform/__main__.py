@@ -6,7 +6,8 @@ import argparse
 import sys
 
 
-def main(argv: list[str] | None = None) -> int:
+def build_parser() -> argparse.ArgumentParser:
+    """The CLI parser, exposed for tests (docs-claim flag verification)."""
     parser = argparse.ArgumentParser(
         prog="cyt-analyzer",
         description="CYT EDC platform (P0–P3: service, trust, debrief, RF)",
@@ -182,6 +183,11 @@ def main(argv: list[str] | None = None) -> int:
         )
         _config_flag(_inc)
 
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
     args = parser.parse_args(argv)
 
     if args.init_store_key:
