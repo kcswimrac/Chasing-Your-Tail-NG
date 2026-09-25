@@ -10,12 +10,13 @@ product principle). This module turns a ``FusedAssessment`` into:
 * ``render_confidence_block`` — the human-readable text form.
 
 RF-sourced text (detector summaries/evidence details can embed
-device-derived strings) is escaped with the repo's canonical
-``InputValidator.escape_markdown_text`` before entering the rendered
-text form — the same tested helper the KML/markdown render paths use —
-so a hostile SSID or tracker name is inert in any downstream sink. The
-JSON block stores the raw (already redacted-by-detector) details
-unescaped: JSON is not a markup sink.
+device-derived strings) is redacted with ``privacy.redact_evidence_text``
+before use — identity and markup are stripped at this block boundary, so
+a hostile SSID or tracker name is neither readable nor active anywhere
+the block lands. The rendered text form additionally escapes the
+redacted details (and kind/detector tokens) with the repo's canonical
+``InputValidator.escape_markdown_text`` — redaction composes with the
+display-field escaping, it does not replace it.
 
 ``attach`` is the single wiring helper for emit paths: it fuses one
 result and stores the block on ``incident_fields()`` output. Fusion
@@ -30,6 +31,7 @@ from typing import Any, Dict, List, Optional
 
 from cyt_platform.confidence import FusedAssessment, fuse
 from cyt_platform.detectors import DetectionResult
+from cyt_platform.privacy import redact_evidence_text
 from input_validation import InputValidator
 
 logger = logging.getLogger(__name__)
@@ -39,7 +41,11 @@ def _contribution_dict(contribution) -> Dict[str, Any]:
     line = contribution.line
     return {
         "kind": line.kind,
-        "detail": line.detail,
+        # D9: the JSON block is not a markup sink itself, but it is copied
+        # verbatim into status.json evidence and push bodies that render —
+        # so details are redacted here, at the block boundary, not left to
+        # every downstream consumer.
+        "detail": redact_evidence_text(line.detail),
         "weight": line.weight,
         "detector": contribution.detector,
         "obs_ids": list(line.obs_ids),
@@ -67,11 +73,12 @@ def fused_evidence(assessment: FusedAssessment) -> Dict[str, Any]:
 def render_confidence_block(assessment: FusedAssessment) -> str:
     """Human-readable explainable block (spec D4's Confidence/Why/Against).
 
-    Every number cites its evidence kind; RF-sourced details are escaped
-    with the canonical markdown/HTML escaping so a hostile SSID or
-    tracker name renders as inert literal text in any downstream sink.
-    Kind and detector tokens are escaped too — they are normally
-    code-controlled, but escaping them keeps the invariant total.
+    Every number cites its evidence kind. Details are redacted first
+    (identity + markup stripped), then escaped with the canonical
+    markdown/HTML escaping — the two layers compose, so a hostile SSID or
+    tracker name is neither readable nor active in any downstream sink.
+    Kind and detector tokens are code-controlled but escaped too —
+    escaping them keeps the invariant total.
     """
     escape = InputValidator.escape_markdown_text
     lines: List[str] = [
@@ -84,7 +91,7 @@ def render_confidence_block(assessment: FusedAssessment) -> str:
         for c in assessment.why:
             lines.append(
                 f"  + {escape(c.line.kind)} {c.line.weight:+.2f} — "
-                f"{escape(c.line.detail)} "
+                f"{escape(redact_evidence_text(c.line.detail))} "
                 f"({escape(c.detector)})"
             )
     else:
@@ -94,7 +101,7 @@ def render_confidence_block(assessment: FusedAssessment) -> str:
         for c in assessment.against:
             lines.append(
                 f"  - {escape(c.line.kind)} {c.line.weight:+.2f} — "
-                f"{escape(c.line.detail)} "
+                f"{escape(redact_evidence_text(c.line.detail))} "
                 f"({escape(c.detector)})"
             )
     if not assessment.may_alert:

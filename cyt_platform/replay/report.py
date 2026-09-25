@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, List
 
+from cyt_platform.privacy import redact_evidence_object, redact_evidence_text
 from cyt_platform.replay.scenario import ScenarioDocument
 
 REPLAY_REPORT_VERSION = 1
@@ -63,6 +64,13 @@ def _fetch_events(store: Any) -> List[Dict[str, Any]]:
                 d["detail"] = None
         else:
             d["detail"] = None
+        # D9: the report is a shareable artifact and the replay's entire
+        # observable output — event summaries and detail (alert reasons,
+        # device names can carry hostile SSID text) are redacted at this
+        # boundary. Redaction is pure/deterministic, so byte-identity of
+        # the report across runs is preserved.
+        d["summary"] = redact_evidence_text(d.get("summary") or "")
+        d["detail"] = redact_evidence_object(d.get("detail"))
         out.append(d)
     return out
 

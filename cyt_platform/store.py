@@ -25,7 +25,12 @@ from cyt_platform.crypto import (
     secure_delete,
     unseal_file,
 )
-from cyt_platform.privacy import chmod_private_file, ensure_dir
+from cyt_platform.privacy import (
+    chmod_private_file,
+    ensure_dir,
+    redact_evidence_object,
+    redact_evidence_text,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1322,10 +1327,15 @@ class CytStore:
             out.append(
                 {
                     "severity": r["severity"],
-                    "summary": r["summary"],
+                    # D9: evidence surfaces carry no raw MAC/SSID and no
+                    # markup that survives into a renderer — summary and
+                    # the evidence block are redacted at this boundary.
+                    "summary": redact_evidence_text(r["summary"]),
                     "window": r["window_label"],
                     "observation_count": r["observation_count"],
-                    "evidence": ev,
+                    "evidence": (
+                        redact_evidence_object(ev) if ev is not None else None
+                    ),
                 }
             )
         return out
