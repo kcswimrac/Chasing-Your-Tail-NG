@@ -18,6 +18,7 @@ from cyt_platform.detectors import (
     incident_fields,
     subject_fingerprint,
 )
+from cyt_platform.fused_evidence import attach as attach_fusion
 
 logger = logging.getLogger(__name__)
 
@@ -165,11 +166,13 @@ class BLETrackerEngine:
             self.store.upsert_entity(
                 "ble_tracker", mac, now, meta={"score": score, "name": _device_name(dd)}
             )
-            self.store.observe_incident(
-                **incident_fields(
-                    _ble_result(mac, dd, score, reasons, now),
-                    session_id=self.store.get_runtime("session_id") or "ble",
-                )
+            result = _ble_result(mac, dd, score, reasons, now)
+            fields = incident_fields(
+                result,
+                session_id=self.store.get_runtime("session_id") or "ble",
             )
+            # D4: evidence additionally carries the fused why/against block.
+            attach_fusion(fields, result)
+            self.store.observe_incident(**fields)
             hits += 1
         return hits

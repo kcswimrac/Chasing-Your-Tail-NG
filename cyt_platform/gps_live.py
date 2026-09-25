@@ -22,6 +22,7 @@ from cyt_platform.detectors import (
     EvidenceLine,
     incident_fields,
 )
+from cyt_platform.fused_evidence import attach as attach_fusion
 from cyt_platform.location import (
     DEFAULT_DENSITY_WINDOW_S,
     DEFAULT_MERGE_RADIUS_M,
@@ -512,11 +513,13 @@ class LiveGpsFusion:
             )
             # Raise durable incident for high co-travel
             if score >= float(self.cfg.get("incident_score_threshold") or 0.55):
-                self.store.observe_incident(
-                    **incident_fields(
-                        _cotravel_result(key, locs, score, detail, now),
-                        session_id=self.store.get_runtime("session_id") or "gps",
-                    )
+                result = _cotravel_result(key, locs, score, detail, now)
+                fields = incident_fields(
+                    result,
+                    session_id=self.store.get_runtime("session_id") or "gps",
                 )
+                # D4: evidence additionally carries the fused why/against block.
+                attach_fusion(fields, result)
+                self.store.observe_incident(**fields)
         results.sort(key=lambda x: x["score"], reverse=True)
         return results

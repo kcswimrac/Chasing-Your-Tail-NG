@@ -17,6 +17,7 @@ from cyt_platform.detectors import (
     EvidenceLine,
     incident_fields,
 )
+from cyt_platform.fused_evidence import attach as attach_fusion
 from cyt_platform.privacy import sanitize_error
 from cyt_platform.health import (
     GPS_DROPOUT_DEFAULT_SECONDS,
@@ -375,24 +376,28 @@ class RFPluginRunner:
         """Emit one deauth detection through the contract (D6).
 
         Severity/reasons/detail are unchanged from the pre-contract adapter —
-        this is a shape migration, not a behavior change.
+        this is a shape migration, not a behavior change. D4: the incident's
+        evidence additionally carries the fused why/against block.
         """
-        self.store.observe_incident(
-            **incident_fields(
-                _deauth_result(atk, now),
-                session_id=self.store.get_runtime("session_id") or "rf",
-            )
+        result = _deauth_result(atk, now)
+        fields = incident_fields(
+            result,
+            session_id=self.store.get_runtime("session_id") or "rf",
         )
+        attach_fusion(fields, result)
+        self.store.observe_incident(**fields)
 
     def _incident_from_rogue(self, al: Any, now: float) -> None:
         """Emit one rogue-AP detection through the contract (D6).
 
         Severity/reasons/detail are unchanged from the pre-contract adapter —
-        this is a shape migration, not a behavior change.
+        this is a shape migration, not a behavior change. D4: the incident's
+        evidence additionally carries the fused why/against block.
         """
-        self.store.observe_incident(
-            **incident_fields(
-                _rogue_result(al, now),
-                session_id=self.store.get_runtime("session_id") or "rf",
-            )
+        result = _rogue_result(al, now)
+        fields = incident_fields(
+            result,
+            session_id=self.store.get_runtime("session_id") or "rf",
         )
+        attach_fusion(fields, result)
+        self.store.observe_incident(**fields)
