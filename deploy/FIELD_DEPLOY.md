@@ -50,14 +50,20 @@ python -m cyt_platform --self-check -c /etc/cyt/config.json
 | alert | red blink |
 | fail  | red solid |
 
-`status.json` never includes raw MAC/SSID lists — counts and component health only.
+`status.json` carries no raw MAC, SSID, or device-name text. Identity is
+redacted at the detector source: MACs render as `AA:BB:xx:xx:xx:FF`
+(OUI + last octet), SSIDs and device names as stable
+`ssid(len=N,h=XXXX)` tokens; evidence is counts + component health plus
+those redacted reason lines.
 
 ## Encryption + panic wipe (P1)
 
 ```bash
 # Generate store key (once)
 sudo python -m cyt_platform --init-store-key /etc/cyt/store.key
-sudo chown root:cyt /etc/cyt/store.key && sudo chmod 0640 /etc/cyt/store.key
+# Owner-only (0600): the service refuses to start on a group/world-readable
+# key file (fail-closed key hygiene).
+sudo chown root:cyt /etc/cyt/store.key && sudo chmod 0600 /etc/cyt/store.key
 # config.edc.json already has store.encryption.enabled=true and key_file path
 
 # Panic wipe (device lost / seize risk)

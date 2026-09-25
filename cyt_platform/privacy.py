@@ -91,6 +91,37 @@ def redact_subject(subject: str, kind: str = "mac") -> str:
     return f"ssid(len={len(subject)},h={_stable_digest(subject)})"
 
 
+def configured_subjects(config: dict) -> list:
+    """Subject values (SSIDs) the operator named in config.
+
+    These are the highest-sensitivity strings on the deployment — the
+    operator's own trusted/monitored network names — so the logging layer
+    redacts them wherever they appear, in any record, from any module.
+    """
+    rogue = config.get("rogue_ap_detection") or {}
+    subjects = set(rogue.get("monitored_ssids") or [])
+    for ap in rogue.get("trusted_aps") or []:
+        ssid = ap.get("ssid") if isinstance(ap, dict) else None
+        if ssid:
+            subjects.add(ssid)
+    return sorted(subjects)
+
+
+def redact_subjects_in_text(text: str, subjects) -> str:
+    """Replace every occurrence of a known subject with its stable token.
+
+    Longest first, so overlapping names cannot leave a partial token.
+    Pure and deterministic (``redact_subject`` is sha1-derived), so the
+    logging filter that applies it stays replay- and test-stable.
+    """
+    if not isinstance(text, str):
+        return text
+    for subject in sorted({s for s in subjects if s}, key=len, reverse=True):
+        if subject in text:
+            text = text.replace(subject, redact_subject(subject, "ssid"))
+    return text
+
+
 def redact_evidence_text(text: str) -> str:
     """Neutralize identity and markup in one free-text evidence string.
 

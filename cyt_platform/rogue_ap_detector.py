@@ -24,6 +24,7 @@ from cyt_platform.kismet_ro import (
     coerce_watermark,
     scan_start_from_watermark,
 )
+from cyt_platform.privacy import redact_subject
 
 logger = logging.getLogger(__name__)
 
@@ -255,7 +256,9 @@ class RogueAPDetector:
                                 )
                                 self.learned_aps[ssid].append(learned)
                                 logger.info(
-                                    f"Learned AP: {ssid} -> {bssid} "
+                                    # S7/B3: logs are a leak surface too —
+                                    # the raw SSID never reaches journald.
+                                    f"Learned AP: {redact_subject(ssid, 'ssid')} -> {bssid} "
                                     f"(ch {channel}, {encryption})"
                                 )
                             elif prev_bssids and bssid not in prev_bssids:
@@ -267,7 +270,10 @@ class RogueAPDetector:
                                     timestamp=last_time,
                                     severity="HIGH",
                                     reasons=[
-                                        f"New BSSID detected for monitored SSID '{ssid}'",
+                                        # B3: reason text is a status/push/report
+                                        # surface — never interpolate the raw
+                                        # SSID; emit the stable redacted token.
+                                        f"New BSSID detected for monitored SSID {redact_subject(ssid, 'ssid')}",
                                         f"Previously seen from: {', '.join(prev_bssids)}",
                                         f"Now also seen from: {bssid}"
                                     ],
@@ -336,7 +342,9 @@ class RogueAPDetector:
         # Unknown BSSID advertising a trusted SSID - likely evil twin
         primary_trusted = trusted_list[0]
         reasons = [
-            f"EVIL TWIN: Unknown BSSID '{bssid}' advertising trusted SSID '{ssid}'",
+            # B3: reason text reaches status.json, the push body, replay
+            # reports, and the debrief — never interpolate the raw SSID.
+            f"EVIL TWIN: Unknown BSSID '{bssid}' advertising trusted SSID {redact_subject(ssid, 'ssid')}",
             f"Trusted BSSID(s): {', '.join(trusted_bssids)}"
         ]
 
