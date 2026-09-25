@@ -62,6 +62,7 @@ def _result(
     observed_at: float = T0,
     subject: str = MAC,
     window: str = "15-20",
+    severity: str = "watch",
 ) -> DetectionResult:
     return DetectionResult(
         detector=detector,
@@ -69,7 +70,7 @@ def _result(
         subject=subject,
         subject_type="wifi_mac",
         window_label=window,
-        severity="watch",
+        severity=severity,
         observed_at=observed_at,
         summary=f"{detector} on {subject}",
         evidence=(EvidenceLine(kind_evidence, f"{kind_evidence} detail"),),
@@ -421,3 +422,76 @@ def test_contributions_are_cumulative_not_per_cycle(store: CytStore):
     assert contributions[0]["hits"] == 3
     assert contributions[0]["first_ts"] == pytest.approx(T0)
     assert contributions[0]["last_ts"] == pytest.approx(T0 + 20)
+
+
+# --- S12: the cursor runs on filing sequence, never on evidence time --------
+
+
+def test_late_stamped_evidence_is_consumed_not_skipped(store: CytStore):
+    """A HIGH row filed at T+60 carrying last_seen=T-10 must be consumed.
+
+    A deauth result is stamped with the attack's last-frame time, so
+    late-filed evidence legitimately trails the cycle clock. The old
+    cursor (max(now, newest_last_seen)) jumped past it on the quiet T0
+    pass and the row was skipped forever.
+    """
+    engine = _engine(store)
+    # Quiet pass at T0: under the old scheme this advanced the cursor to
+    # T0 — exactly the state that hid late-stamped rows.
+    assert engine.apply(now=T0) == []
+
+    _emit(
+        store,
+        _result("deauth", "deauth_pattern", observed_at=T0 - 10, severity="alert"),
+        session="sess-late",
+    )
+    engine.apply(now=T0 + 60)
+
+    ph = _phenomenon(store)
+    assert ph is not None, "late-stamped detector row was skipped by the cursor"
+    assert ph["lifecycle_state"] is not None
+    contrib = store.conn.execute(
+        "SELECT hits FROM incident_contributions "
+        "WHERE incident_id=? AND detector='deauth'",
+        (ph["id"],),
+    ).fetchone()
+    assert contrib is not None and int(contrib["hits"]) == 1
+
+    # Cursor monotonicity: a further quiet pass re-consumes nothing — no
+    # duplicate contribution hits. (The lifecycle state itself may decay
+    # on stale evidence; that is the staleness pass, not consumption.)
+    engine.apply(now=T0 + 120)
+    hits = store.conn.execute(
+        "SELECT hits FROM incident_contributions "
+        "WHERE incident_id=? AND detector='deauth'",
+        (ph["id"],),
+    ).fetchone()
+    assert int(hits["hits"]) == 1
+
+
+def test_refiled_row_is_reconsumed_on_newer_evidence(store: CytStore):
+    """Re-filing the same incident key with newer evidence re-consumes it.
+
+    The old timestamp cursor re-selected updated rows because last_seen
+    moved past it; the sequence cursor must do the same — every file and
+    re-file assigns a fresh sequence.
+    """
+    _emit(store, _result("cotravel", "cotravel_visit"), session="sess-refile")
+    engine = _engine(store)
+    engine.apply(now=T0)
+    ph = _phenomenon(store)
+    assert ph is not None
+
+    _emit(
+        store,
+        _result("cotravel", "cotravel_visit", observed_at=T0 + 30),
+        session="sess-refile",
+    )
+    engine.apply(now=T0 + 60)
+
+    hits = store.conn.execute(
+        "SELECT hits FROM incident_contributions "
+        "WHERE incident_id=? AND detector='cotravel'",
+        (ph["id"],),
+    ).fetchone()
+    assert int(hits["hits"]) == 2

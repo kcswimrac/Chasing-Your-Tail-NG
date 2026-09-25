@@ -6,11 +6,15 @@ from pathlib import Path
 
 import pytest
 
+from cyt_platform.detectors import DetectionResult, EvidenceLine, incident_fields
+from cyt_platform.fused_evidence import attach as attach_fusion
+from cyt_platform.incidents import IncidentEngine, IncidentStatus
 from cyt_platform.store import CytStore, RETENTION_CLASSES
 
 BASE = 1_700_000_000.0
 DAYS = 86400
 BULK_OBS = 600  # enough rows to grow the DB well past one page
+MAC = "AA:BB:CC:00:00:42"
 
 
 @pytest.fixture
@@ -259,3 +263,115 @@ def test_hypothesis_retention_only_stale_candidates(store: CytStore):
         ("AA:00:00:00:00:05", "AA:00:00:00:00:06", "linked"),
         ("AA:00:00:00:00:07", "AA:00:00:00:00:08", "rejected"),
     }
+
+
+# --- S14: purge over engine-managed incidents (timeline children) ----------
+
+V2_CFG = {
+    "fusion": {"weights": {"window_match": 0.5, "cotravel_visit": 0.5}},
+    "incidents_v2": {
+        "enabled": True,
+        "watch_confidence": 0.30,
+        "alert_confidence": 0.60,
+        "alert_min_detectors": 2,
+        "close_after_s": 600.0,
+        "decay_grace_s": 120.0,
+    },
+}
+
+
+def _close_engine_incident_through_disposition(store: CytStore) -> str:
+    """Drive one real phenomenon incident to a closed disposition.
+
+    Uses the exact emit path contract detectors use (incident_fields +
+    fusion attach + observe_incident), so the incident goes through real
+    lifecycle transitions and carries incident_timeline and
+    incident_contributions children — the shape test fixtures never
+    created before S14.
+    """
+    engine = IncidentEngine(store, V2_CFG)
+
+    def emit(detector: str, kind: str) -> None:
+        result = DetectionResult(
+            detector=detector,
+            kind=detector,
+            subject=MAC,
+            subject_type="wifi_mac",
+            window_label="15-20",
+            severity="watch",
+            observed_at=BASE,
+            summary=f"{detector} on {MAC}",
+            evidence=(EvidenceLine(kind, f"{kind} detail"),),
+        )
+        fields = incident_fields(result, session_id="sess-purge")
+        attach_fusion(fields, result)
+        store.observe_incident(**fields)
+
+    emit("mac_reappear", "window_match")
+    emit("cotravel", "cotravel_visit")
+    plans = engine.apply(now=BASE)
+    assert plans, "fixture failed to drive lifecycle transitions"
+
+    ph = store.conn.execute(
+        "SELECT incident_key, lifecycle_state FROM incidents "
+        "WHERE phenomenon_key IS NOT NULL"
+    ).fetchone()
+    assert ph is not None and ph["lifecycle_state"] == "alert"
+    key = ph["incident_key"]
+    engine.dispose(key, IncidentStatus.KNOWN_DEVICE, BASE + 2)
+    return key
+
+
+def test_purge_survives_engine_managed_incident_with_timeline(store: CytStore):
+    """S14: a closed lifecycle incident purges cleanly under foreign_keys=ON.
+
+    purge_retention used to delete the parent incidents row before its
+    incident_timeline/incident_contributions children; with immediate
+    foreign keys that raised IntegrityError on the first closed lifecycle
+    incident — and in the service, rolled back the whole per-cycle
+    transaction every tenth cycle.
+    """
+    fk = int(store.conn.execute("PRAGMA foreign_keys").fetchone()[0])
+    assert fk == 1, "test is meaningless without the production pragma"
+
+    key = _close_engine_incident_through_disposition(store)
+    closed = store.conn.execute(
+        "SELECT id, status, closed_at FROM incidents WHERE incident_key=?", (key,)
+    ).fetchone()
+    assert closed["status"] == "closed" and closed["closed_at"] is not None
+    iid = int(closed["id"])
+    timeline_before = int(
+        store.conn.execute(
+            "SELECT COUNT(*) FROM incident_timeline WHERE incident_id=?", (iid,)
+        ).fetchone()[0]
+    )
+    contribs_before = int(
+        store.conn.execute(
+            "SELECT COUNT(*) FROM incident_contributions WHERE incident_id=?", (iid,)
+        ).fetchone()[0]
+    )
+    assert timeline_before >= 2, "fixture produced no lifecycle transitions"
+    assert contribs_before >= 1
+
+    counts = store.purge_retention(now=BASE + 15 * DAYS)
+
+    assert counts["incidents"] == 1  # the closed phenomenon row
+    assert counts["incident_timeline"] == timeline_before
+    assert counts["incident_contributions"] == contribs_before
+    # The closed lifecycle incident and its audit children are gone.
+    assert count(store, "incident_timeline") == 0
+    assert count(store, "incident_contributions") == 0
+    assert count(store, "incidents") == 2
+    # Open detector-owned rows are not purge candidates — they survive,
+    # and no phenomenon row is left behind.
+    remaining = store.conn.execute(
+        "SELECT COUNT(*) FROM incidents "
+        "WHERE lifecycle_state IS NULL AND status='open'"
+    ).fetchone()[0]
+    assert int(remaining) == 2
+    assert (
+        store.conn.execute(
+            "SELECT COUNT(*) FROM incidents WHERE phenomenon_key IS NOT NULL"
+        ).fetchone()[0]
+        == 0
+    )
