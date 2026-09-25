@@ -182,12 +182,13 @@ def extract_ie_fingerprint(device_data: dict) -> Optional[Dict[str, Any]]:
     }
 
 
-def device_view(identity_key: str, device_data: dict) -> DeviceView:
+def device_view(identity_key: str, device_data: dict, now: Optional[float] = None) -> DeviceView:
     """Build a DeviceView from one Kismet device JSON record.
 
     Probe SSIDs are normalized to lowercase comparison keys; they never
     re-enter evidence as text. A location is taken from the device's own GPS
-    tag when present.
+    tag when present. ``now`` is the caller's cycle clock, forwarded to
+    location extraction so no wall-clock read happens while scoring (S6).
     """
     ssids = extract_probe_ssids(device_data)
     tags, caps = _walk_ie_features(device_data.get("dot11.device") or device_data)
@@ -201,7 +202,7 @@ def device_view(identity_key: str, device_data: dict) -> DeviceView:
 
     locations: Tuple[Tuple[float, float], ...] = ()
     try:
-        loc = extract_gps_from_device_json(dict(device_data))
+        loc = extract_gps_from_device_json(dict(device_data), now=now)
         if loc is not None:
             locations = ((loc[0], loc[1]),)
     except Exception as exc:  # location context is best-effort, never fatal

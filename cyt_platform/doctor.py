@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Optional, Tuple
 
 from cyt_platform.config import ConfigError, load_json
-from cyt_platform.crypto import sealed_path_for
+from cyt_platform.crypto import key_mode_violation, sealed_path_for
 from cyt_platform.health import ComponentFailureRegistry
 from cyt_platform.kismet_resolve import KismetDbResolver
 from cyt_platform.privacy import ensure_dir, sanitize_error
@@ -129,6 +129,42 @@ def _check_led_paths(config: dict) -> CheckResult:
     return CheckResult("led_path", PASS, f"LED state dir writable: {runtime}")
 
 
+def _check_key_files(config: dict) -> CheckResult:
+    """S4: store key material must never be group/world-readable.
+
+    A weak mode is exactly the failure the runtime refuses (crypto raises
+    on load), so doctor reports it as FAIL with the same remediation.
+    """
+    enc = (config.get("store") or {}).get("encryption") or {}
+    candidates: list = []
+    env_key = os.environ.get("CYT_STORE_KEY_FILE")
+    if env_key:
+        candidates.append(Path(env_key))
+    if enc.get("key_file"):
+        candidates.append(Path(enc["key_file"]))
+    if enc.get("password_file"):
+        candidates.append(Path(enc["password_file"]))
+    if enc.get("enabled"):
+        candidates.append(Path(enc.get("salt_file") or "data/store_salt.bin"))
+    existing = [p for p in candidates if p.is_file()]
+    if not existing:
+        if enc.get("enabled"):
+            return CheckResult(
+                "key_files",
+                WARN,
+                "encryption enabled but no key material found on disk — "
+                "the service will refuse to start",
+            )
+        return CheckResult(
+            "key_files", PASS, "no key material configured (encryption disabled)"
+        )
+    problems = [v for v in (key_mode_violation(p) for p in existing) if v]
+    if problems:
+        return CheckResult("key_files", FAIL, "; ".join(problems))
+    modes = ", ".join(f"{p.name} {oct(p.stat().st_mode & 0o777)}" for p in existing)
+    return CheckResult("key_files", PASS, f"key material private: {modes}")
+
+
 def _enabled_detectors(config: dict) -> set:
     rf = config.get("rf") or {}
     enabled = set()
@@ -210,12 +246,16 @@ def run_checks(config_path: Optional[str] = None) -> list:
     except ConfigError as e:
         return [
             CheckResult("config", FAIL, str(e)),
-            *_skipped(("store", "kismet", "status_path", "led_path", "detectors")),
+            *_skipped(
+                ("store", "kismet", "status_path", "led_path", "key_files", "detectors")
+            ),
         ]
     except (OSError, ValueError) as e:
         return [
             CheckResult("config", FAIL, f"cannot load config: {sanitize_error(e)}"),
-            *_skipped(("store", "kismet", "status_path", "led_path", "detectors")),
+            *_skipped(
+                ("store", "kismet", "status_path", "led_path", "key_files", "detectors")
+            ),
         ]
 
     results: list = [CheckResult("config", PASS, "valid")]
@@ -224,6 +264,7 @@ def run_checks(config_path: Optional[str] = None) -> list:
     results.append(_check_kismet(config))
     results.append(_check_status_path(config))
     results.append(_check_led_paths(config))
+    results.append(_check_key_files(config))
     results.append(_check_detectors(config, store))
     if store is not None:
         store.close()

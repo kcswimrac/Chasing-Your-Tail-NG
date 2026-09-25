@@ -15,6 +15,7 @@ import pytest
 from cyt_platform.identity import (
     STATUS_CANDIDATE,
     STATUS_LINKED,
+    STATUS_REJECTED,
     relink_severity,
 )
 from cyt_platform.ie_fingerprint import IEFingerprintEngine
@@ -149,7 +150,12 @@ def test_co_observed_history_vetoes_link(store):
         eng.process_devices([_dev(MAC_A)], now=1000.0)
         eng.process_devices([_dev(MAC_B)], now=1100.0)
 
-    assert store.list_identity_hypotheses() == []
+    # S15: the veto is persisted as a sticky rejected hypothesis — the
+    # contradiction must outlive observation retention — but it never links
+    # and never files a relink incident.
+    hyps = store.list_identity_hypotheses()
+    assert len(hyps) == 1
+    assert hyps[0]["status"] == STATUS_REJECTED
     assert _relink_incidents(store) == []
 
 

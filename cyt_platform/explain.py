@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
+from cyt_platform.detectors import subject_fingerprint
+
 
 def build_evidence(
     *,
@@ -57,5 +59,7 @@ def format_evidence_line(evidence: Dict[str, Any]) -> str:
 
 
 def _fp(subject: str) -> str:
-    h = abs(hash(subject)) % 0xFFFFFFFF
-    return f"{h:08x}"
+    # S5: the subject fingerprint must be stable across restarts (its only
+    # purpose is cross-restart correlation), so it uses the sha1-based
+    # detectors.subject_fingerprint — never CPython's salted hash().
+    return f"{subject_fingerprint(subject):08x}"

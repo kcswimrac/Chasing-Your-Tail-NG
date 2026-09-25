@@ -156,14 +156,22 @@ def test_co_observed_pair_never_links():
     # overlapping presence spans: two radios seen live can never be one device
     a = _view("AA", ssids=("home", "cafe", "gym"), tags=(1, 5, 11), first=100.0, last=180.0)
     b = _view("BB", ssids=("home", "cafe", "gym"), tags=(1, 5, 11), first=150.0, last=260.0)
-    assert score_link(a, b, CTX) is None
+    hyp = score_link(a, b, CTX)
+    # S15: the veto is persisted, not silently dropped — the caller records
+    # the returned REJECTED hypothesis so retention cannot erase the proof.
+    assert hyp is not None
+    assert hyp.status == STATUS_REJECTED
+    assert hyp.confidence == 0.0
+    assert any("co-observation veto" in r for r in hyp.reasons)
 
 
 def test_within_co_window_pair_never_links():
     # even identical fingerprints with a 10s gap: effectively simultaneous
     a = _view("AA", ssids=("home", "cafe"), tags=(1, 5), first=100.0, last=100.0)
     b = _view("BB", ssids=("home", "cafe"), tags=(1, 5), first=110.0, last=110.0)
-    assert score_link(a, b, CTX) is None
+    hyp = score_link(a, b, CTX)
+    assert hyp is not None
+    assert hyp.status == STATUS_REJECTED
 
 
 def test_temporal_handoff_scores_but_long_gap_does_not():
@@ -385,3 +393,43 @@ def test_score_link_identity_hypothesis_roundtrip(store):
     assert stored["confidence"] == pytest.approx(hyp.confidence)
     assert stored["reasons"] == list(hyp.reasons)
     assert stored["status"] == hyp.status
+
+
+def test_co_observation_veto_survives_retention_purge(store):
+    """S15 regression: the co-observation veto must outlive observation purge.
+
+    Before the fix the veto was dropped on the floor (score_link returned
+    None and nothing was stored), so once the co-presence observations aged
+    out of the 7-day retention window the same pair re-scored from
+    fingerprints alone minted a ('linked', 0.82) hypothesis — exactly the
+    link the veto existed to prevent.
+    """
+    a = _view("AA", ssids=("home", "cafe", "gym"), tags=(1, 5, 11), first=100.0, last=180.0)
+    b = _view("BB", ssids=("home", "cafe", "gym"), tags=(1, 5, 11), first=150.0, last=260.0)
+    hyp = score_link(a, b, CTX)
+    assert hyp is not None and hyp.status == STATUS_REJECTED
+    stored = store.upsert_identity_hypothesis(
+        key_a=hyp.key_a,
+        key_b=hyp.key_b,
+        confidence=hyp.confidence,
+        status=hyp.status,
+        reasons=list(hyp.reasons),
+        ts=CTX.now,
+    )
+    assert stored["status"] == STATUS_REJECTED
+
+    # 8 days later: observations are purged (7-day retention), the rejected
+    # hypothesis must survive, and a later rescore cannot flip it to linked.
+    store.purge_retention(now=CTX.now + 8 * 86400)
+    after = store.get_identity_hypothesis(hyp.hypothesis_id)
+    assert after is not None
+    assert after["status"] == STATUS_REJECTED
+    rescored = store.upsert_identity_hypothesis(
+        key_a=hyp.key_a,
+        key_b=hyp.key_b,
+        confidence=0.82,
+        status=STATUS_LINKED,
+        reasons=["probe-SSID Jaccard 1.00 (3 shared)"],
+        ts=CTX.now + 8 * 86400,
+    )
+    assert rescored["status"] == STATUS_REJECTED
