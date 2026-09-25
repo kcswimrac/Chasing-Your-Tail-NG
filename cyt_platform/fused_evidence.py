@@ -70,7 +70,10 @@ def render_confidence_block(assessment: FusedAssessment) -> str:
     Every number cites its evidence kind; RF-sourced details are escaped
     with the canonical markdown/HTML escaping so a hostile SSID or
     tracker name renders as inert literal text in any downstream sink.
+    Kind and detector tokens are escaped too — they are normally
+    code-controlled, but escaping them keeps the invariant total.
     """
+    escape = InputValidator.escape_markdown_text
     lines: List[str] = [
         f"Confidence: {assessment.confidence:.0%} "
         f"({len(assessment.independent_kinds)} independent kinds, "
@@ -80,9 +83,9 @@ def render_confidence_block(assessment: FusedAssessment) -> str:
         lines.append("Why:")
         for c in assessment.why:
             lines.append(
-                f"  + {c.line.kind} {c.line.weight:+.2f} — "
-                f"{InputValidator.escape_markdown_text(c.line.detail)} "
-                f"({c.detector})"
+                f"  + {escape(c.line.kind)} {c.line.weight:+.2f} — "
+                f"{escape(c.line.detail)} "
+                f"({escape(c.detector)})"
             )
     else:
         lines.append("Why: (no supporting evidence)")
@@ -90,9 +93,9 @@ def render_confidence_block(assessment: FusedAssessment) -> str:
         lines.append("Against:")
         for c in assessment.against:
             lines.append(
-                f"  - {c.line.kind} {c.line.weight:+.2f} — "
-                f"{InputValidator.escape_markdown_text(c.line.detail)} "
-                f"({c.detector})"
+                f"  - {escape(c.line.kind)} {c.line.weight:+.2f} — "
+                f"{escape(c.line.detail)} "
+                f"({escape(c.detector)})"
             )
     if not assessment.may_alert:
         lines.append(

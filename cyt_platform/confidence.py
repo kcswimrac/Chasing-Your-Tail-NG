@@ -70,6 +70,16 @@ class FusionConfig:
         weights = dict(section.get("weights") or {})
         weights.update(raw.get("weights") or {})
         section["weights"] = weights
+        # Overlay the remaining fusion keys so partial overrides are honored
+        # rather than silently dropped.
+        for key in (
+            "min_independent_kinds",
+            "max_confidence",
+            "default_weight",
+            "self_ref_kinds",
+        ):
+            if key in raw:
+                section[key] = raw[key]
 
         parsed_weights = {
             str(kind): _validate_weight(value, f"fusion.weights.{kind}")
