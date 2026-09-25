@@ -143,8 +143,13 @@ DEFAULTS: Dict[str, Any] = {
             "rogue_reason": 0.25,
             # BLE tracker signal: name/manuf/metadata token match.
             "ble_signal": 0.25,
-            # D5 location geometry: a distinct visit on the operator path.
-            "independent_visits": 0.30,
+            # D5 co-travel geometry (gps_live._cotravel_result): the device
+            # is co-present with the operator at a place, and its sightings
+            # span the operator's travel (multi-place tracking). Together
+            # these are the facets of "independent visits"; listing them is
+            # what makes the primary follower scenario alertable at all.
+            "copresence": 0.30,
+            "travel_span": 0.25,
             # The detector's own computed score (self-reference; weight
             # only, never independent evidence).
             "score": 0.10,

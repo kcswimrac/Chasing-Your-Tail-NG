@@ -13,13 +13,17 @@ Covers the acceptance criteria for the explainability core:
 
 from __future__ import annotations
 
+import ast
 import json
 import random
 import time
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
+import cyt_platform
+from cyt_platform.config import DEFAULTS
 from cyt_platform.confidence import (
     FusionConfig,
     alert_gate,
@@ -474,3 +478,33 @@ def test_fuse_rejects_mixed_subjects_and_empty():
     with pytest.raises(ValueError, match="one subject"):
         fuse([_result(), _result(subject="DD:EE:FF:00:00:01")])
     assert fuse([]) is None
+
+
+def _literal_evidence_kinds(path):
+    """First-positional string-literal kinds of every EvidenceLine call."""
+    tree = ast.parse(path.read_text())
+    kinds = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        if getattr(node.func, "id", "") != "EvidenceLine" or not node.args:
+            continue
+        first = node.args[0]
+        if isinstance(first, ast.Constant) and isinstance(first.value, str):
+            kinds.add(first.value)
+    return kinds
+
+
+def test_every_emitted_evidence_kind_is_weighted():
+    # S2 tripwire: a detector kind missing from fusion.weights silently
+    # fuses at the conservative default weight and never counts as
+    # independent evidence — the drift that held co-travel below WATCH.
+    # Scan the emit-side detector modules; read-side reconstruction in
+    # incidents.py copies stored kinds and is deliberately excluded.
+    modules = ("rf_plugins.py", "gps_live.py", "ble_tracker.py")
+    emitted = set()
+    for name in modules:
+        emitted |= _literal_evidence_kinds(Path(cyt_platform.__file__).parent / name)
+    assert emitted, "no EvidenceLine kinds found — emitters moved?"
+    missing = sorted(emitted - set(DEFAULTS["fusion"]["weights"]))
+    assert not missing, f"kinds emitted but unweighted: {missing}"
