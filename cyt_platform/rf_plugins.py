@@ -360,8 +360,10 @@ class RFPluginRunner:
                 # clock anomaly — visible as its own failing component,
                 # never silently applied. The read side already treats such
                 # a watermark as untrusted
-                # (kismet_ro.scan_start_from_watermark).
-                skew = clock_skew_reason(
+                # (kismet_ro.scan_start_from_watermark), and the detector
+                # repairs the stored value after a clean scan; the anomaly
+                # flag it raised is reported here.
+                skew = getattr(self.deauth, "last_clock_anomaly", None) or clock_skew_reason(
                     watermark=getattr(self.deauth, "last_scan_time", None),
                     newest_event_ts=max(
                         (e.timestamp for e in (events or [])), default=None
