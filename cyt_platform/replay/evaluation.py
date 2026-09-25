@@ -20,12 +20,13 @@ Exit codes (``cyt eval`` / ``python -m cyt_platform eval``):
     1  gate breach (behavior or threshold regression)
     2  harness error (unreadable corpus, malformed gates file)
 
-Known finding carried by the corpus (not hidden by thresholds): raw SSID text
-reaches *evidence* surfaces — event ``detail.reasons`` in replay reports and
-``status.json`` incident evidence. Redaction (``privacy.redact_subject``) is a
-detector-contract fix outside the corpus scope. The render gate below covers
-the *display* fields only (summaries, entity keys, window labels): those must
-stay SSID-free even under hostile-SSID input.
+Known finding resolved by the D9 evidence-redaction wiring: raw SSID text
+used to reach *evidence* surfaces — event ``detail.reasons`` in replay
+reports and ``status.json`` incident evidence. Redaction
+(``privacy.redact_evidence_text``/``redact_subject``) now runs at those
+evidence boundaries (replay report, incident-evidence read, fused block);
+the render gate below covers the *display* fields (summaries, entity keys,
+window labels) and stays as-is.
 """
 
 from __future__ import annotations

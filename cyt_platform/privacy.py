@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 from pathlib import Path
@@ -11,6 +12,16 @@ from typing import Any, Optional, Union
 _MAC_RE = re.compile(r"\b([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}\b")
 _HOME_PATH_RE = re.compile(r"(?:/home|/Users)/[^\s:]+")
 _ABS_PATH_RE = re.compile(r"(?:/var|/opt|/tmp|/run)/[^\s:]+")
+
+# Markup metacharacters that make free text active in HTML/XML/markdown
+# sinks (script tags, CDATA terminators, markdown links/code spans).
+_MARKUP_CHARS_RE = re.compile(r"[<>\[\]`]")
+
+# Control/format characters: C0, DEL, C1, zero-width, and bidi/RTL
+# overrides (direction spoofs are markup-adjacent operator tricks).
+_EVIDENCE_CONTROL_RE = re.compile(
+    "[\x00-\x1f\x7f\x80-\x9f\u200b-\u200f\u202a-\u202e\u2028\u2029\ufeff]"
+)
 
 
 def apply_umask(config: Optional[dict] = None) -> int:
@@ -50,17 +61,83 @@ def sanitize_error(exc: BaseException, max_len: int = 200) -> str:
     return out
 
 
+def _stable_digest(subject: str) -> str:
+    """4-hex digest of a subject, stable across processes and runs.
+
+    Python's builtin ``hash()`` is salted per process (PYTHONHASHSEED), so
+    any redacted value derived from it would break the deterministic-core
+    contract (locked decision 4) the moment it lands in a replayed report.
+    Same sha1-derived pattern as ``detectors.subject_fingerprint``.
+    """
+    digest = hashlib.sha1(subject.encode("utf-8")).digest()
+    return f"{int.from_bytes(digest[:2], 'big'):04x}"
+
+
 def redact_subject(subject: str, kind: str = "mac") -> str:
-    """Redact identity for legacy logs when legacy_log_redact is true."""
+    """Redact identity for evidence/logs; stable across processes.
+
+    MACs keep OUI + last octet (correlation survives, rest is masked);
+    every other subject (SSID, device name, capability text) is replaced
+    by a neutral ``ssid(len=N,h=XXXX)`` token carrying neither the raw
+    text nor its markup.
+    """
     if not subject:
         return "?"
     if kind == "mac" or ":" in subject:
         parts = subject.split(":")
         if len(parts) == 6:
             return f"{parts[0]}:{parts[1]}:xx:xx:xx:{parts[5]}"
-    # SSID: length + short hash prefix
-    h = abs(hash(subject)) % 0xFFFF
-    return f"ssid(len={len(subject)},h={h:04x})"
+    # SSID: length + stable short hash prefix
+    return f"ssid(len={len(subject)},h={_stable_digest(subject)})"
+
+
+def redact_evidence_text(text: str) -> str:
+    """Neutralize identity and markup in one free-text evidence string.
+
+    The evidence-path policy: no raw MAC, no raw subject text, nothing
+    active in downstream HTML/XML/markdown sinks. MAC-shaped tokens are
+    masked via ``redact_subject``; control/bidi characters and markup
+    metacharacters are stripped, so a hostile SSID or device name that a
+    detector embedded in a reason line renders as inert literal text.
+
+    Pure and deterministic — safe inside the replay report contract.
+    """
+    if not isinstance(text, str):
+        return text
+    out = _MAC_RE.sub(lambda m: redact_subject(m.group(0), "mac"), text)
+    out = _EVIDENCE_CONTROL_RE.sub(" ", out)
+    out = _MARKUP_CHARS_RE.sub(" ", out)
+    return " ".join(out.split())
+
+
+# Evidence keys whose string values ARE the subject itself (device-derived
+# names), so they get the full redact_subject treatment, not just
+# markup stripping. Values under any other key are free text.
+_SUBJECT_KEYS = frozenset(
+    {"ssid", "name", "devicename", "commonname", "manuf", "manufacturer"}
+)
+
+
+def redact_evidence_object(obj: Any) -> Any:
+    """Recursively redact every string in evidence-shaped data.
+
+    Walks dicts/lists/tuples from stored evidence_json; non-string scalars
+    pass through untouched. Dict keys are code-authored and kept.
+    """
+    if isinstance(obj, str):
+        return redact_evidence_text(obj)
+    if isinstance(obj, dict):
+        return {
+            key: (
+                redact_subject(value, "ssid")
+                if key in _SUBJECT_KEYS and isinstance(value, str)
+                else redact_evidence_object(value)
+            )
+            for key, value in obj.items()
+        }
+    if isinstance(obj, (list, tuple)):
+        return [redact_evidence_object(item) for item in obj]
+    return obj
 
 
 def fde_ack_present(ack_path: str = "/etc/cyt/fde_ack") -> bool:

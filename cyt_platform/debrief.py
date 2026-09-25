@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from cyt_platform.privacy import redact_evidence_text
+
 
 def _day_bounds(day: Optional[str] = None) -> tuple[float, float, str]:
     """Return (start_ts, end_ts, day_label). day = YYYY-MM-DD local or None=today."""
@@ -183,7 +185,12 @@ def generate_debrief(
                     ev = json.loads(r["evidence_json"])
                 except json.JSONDecodeError:
                     pass
-            reasons = "; ".join(ev.get("reasons") or [r["summary"]])
+            reasons = "; ".join(
+                # D9: debrief markdown renders stored evidence — redact
+                # identity/markup, same as the status.json evidence path.
+                redact_evidence_text(str(item))
+                for item in (ev.get("reasons") or [r["summary"]])
+            )
             span_h = max(0.0, (r["last_seen"] - r["first_seen"]) / 3600.0)
             lines.append(
                 f"{i}. **{r['severity'].upper()}** · window `{r['window_label']}` · "
