@@ -26,6 +26,45 @@ from typing import Dict, Optional
 # "detectors" component in status.json stays derived from this prefix.
 DETECTOR_PREFIX = "detector:"
 
+# GPS dropout: no located fix for the operator feed. A short gap is normal
+# (cold start, tunnel); past the grace window the feed is treated as dead.
+GPS_DROPOUT_DEFAULT_SECONDS = 900.0
+
+# First-cycle state for a sensor that has never produced a fix.
+GPS_NEVER_SEEN = "no_fix"
+GPS_DROPOUT = "dropout"
+
+
+def gps_dropout_reason(
+    *,
+    last_fix_ts: Optional[float],
+    now: float,
+    dropout_seconds: float,
+    min_cycles_before_dropout: int = 0,
+    cycles_seen: int = 1,
+) -> Optional[str]:
+    """Reason the GPS feed is considered degraded, or None when healthy.
+
+    Pure function of the last known fix and the scenario clock (locked
+    decision 4): replayable, no wall-clock reads. A feed that has never
+    produced a fix is ``no_fix`` as soon as it is given a real chance
+    (``min_cycles_before_dropout`` cycles); a feed whose newest fix is older
+    than ``dropout_seconds`` is ``dropout``. Inside the grace window the feed
+    is considered warm and healthy.
+    """
+    if dropout_seconds <= 0:
+        raise ValueError("dropout_seconds must be > 0")
+    if last_fix_ts is None:
+        if cycles_seen >= max(1, min_cycles_before_dropout):
+            return GPS_NEVER_SEEN
+        return None
+    age = now - last_fix_ts
+    if age < 0:
+        # Clock moved backwards / out-of-order fix; treat as fresh rather
+        # than fabricate a failure.
+        return None
+    return GPS_DROPOUT if age > dropout_seconds else None
+
 
 @dataclass
 class ComponentFailure:

@@ -7,12 +7,17 @@ while any plugin is failing (see ``failures()`` and StatusEngine).
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 from typing import Any, Callable, Dict, Optional
 
 from cyt_platform.privacy import sanitize_error
-from cyt_platform.health import ComponentFailureRegistry
+from cyt_platform.health import (
+    GPS_DROPOUT_DEFAULT_SECONDS,
+    ComponentFailureRegistry,
+    gps_dropout_reason,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +68,12 @@ class RFPluginRunner:
         self.registry = (
             registry if registry is not None else ComponentFailureRegistry()
         )
+        gps_cfg = config.get("gps_fusion") or {}
+        self.gps_dropout_seconds = float(
+            gps_cfg.get("dropout_seconds") or GPS_DROPOUT_DEFAULT_SECONDS
+        )
+        self.gps_dropout_min_cycles = int(gps_cfg.get("dropout_min_cycles") or 0)
+        self._gps_cycles_seen = 0
         self.deauth = None
         self.rogue = None
         self.ie = None
@@ -135,6 +146,38 @@ class RFPluginRunner:
         """Component name -> sanitized failure detail; empty when all healthy."""
         return self.registry.failures()
 
+    def _gps_health(
+        self, fix: Any, now: float
+    ) -> Optional[str]:
+        """D6: classify the GPS feed after this cycle's ingest.
+
+        Dropout is NOT an exception: a dead or unfixed GPS feed returns None
+        fixes silently, which must still be visible ("cannot detect" vs "no
+        threat"). The newest known fix is this cycle's fix, the fusion's
+        in-memory last fix, or the persisted runtime last fix (survives
+        restarts), in that order.
+        """
+        fix_ts: Optional[float] = None
+        if fix is not None:
+            fix_ts = float(fix.ts)
+        elif getattr(self.gps, "last_fix", None) is not None:
+            fix_ts = float(self.gps.last_fix.ts)
+        else:
+            raw = self.store.get_runtime("last_gps")
+            if raw:
+                try:
+                    fix_ts = float(json.loads(raw).get("ts"))
+                except (TypeError, ValueError):
+                    fix_ts = None
+        self._gps_cycles_seen += 1
+        return gps_dropout_reason(
+            last_fix_ts=fix_ts,
+            now=now,
+            dropout_seconds=self.gps_dropout_seconds,
+            min_cycles_before_dropout=self.gps_dropout_min_cycles,
+            cycles_seen=self._gps_cycles_seen,
+        )
+
     def run_cycle(
         self,
         kdb: Any,
@@ -167,7 +210,13 @@ class RFPluginRunner:
                     stats["gps"] = {"lat": fix.lat, "lon": fix.lon}
                 co = self.gps.score_cotravel(now)
                 stats["cotravel"] = len(co)
-                self._clear_failure("gps", now)
+                # D6: exception-free dropout (no located fix) is its own
+                # degraded component — a dead GPS feed must be visible.
+                drop = self._gps_health(fix, now)
+                if drop:
+                    self.registry.record_failure("gps", drop, now)
+                else:
+                    self._clear_failure("gps", now)
             except Exception as e:
                 detail = self._record_failure("gps", e, ts=now)
                 logger.warning("gps fusion error: %s", detail)
