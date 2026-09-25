@@ -21,8 +21,10 @@ import hashlib
 import json
 import logging
 import math
-from typing import Any, List, Mapping, Optional, Sequence
+from dataclasses import replace
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
+from cyt_platform.detectors import DetectionResult, EvidenceLine
 from cyt_platform.gps_live import extract_gps_from_device_json
 
 logger = logging.getLogger(__name__)
@@ -131,6 +133,17 @@ def _device_payload(device_data: Mapping, row: Mapping) -> dict:
         payload["device_type"] = str(device_type)
     if isinstance(probed, Mapping):
         payload["ssid_count"] = len(probed)
+    # B6: BLE tracker detection matches on the advertised name/manuf — a
+    # replay of the exported observations cannot reproduce a tracker
+    # incident without them. Observation payloads are the private evidence
+    # substrate (0600 store, field-encryptable); surface redaction applies
+    # on the status/push layer, not here.
+    commonname = _first(device_data, "kismet.device.base.commonname")
+    if commonname is not None:
+        payload["commonname"] = str(commonname)
+    manuf = _first(device_data, "kismet.device.base.manuf")
+    if manuf is not None:
+        payload["manuf"] = str(manuf)
     return payload
 
 
@@ -254,6 +267,28 @@ def normalize_alert_row(
     else:
         locator = f"digest={input_digest(dict(row))[:12]}"
 
+    # B6: carry every field the detectors read back, so an exported
+    # observation reproduces the detection — the deauth scan resolves
+    # attacker/victim from the alert JSON's MAC fields, not from the
+    # columns. Observation payloads are the private evidence substrate
+    # (0600 store, field-encryptable); surface redaction applies on the
+    # status/push layer, not here.
+    payload: Dict[str, Any] = {
+        "header": header,
+        "text": alert_text,
+    }
+    for json_key, payload_key in (
+        ("kismet.alert.src_mac", "source_mac"),
+        ("kismet.alert.tx_mac", "source_mac"),
+        ("kismet.alert.dest_mac", "dest_mac"),
+        ("kismet.alert.channel", "channel"),
+    ):
+        if alert_json.get(json_key) is not None:
+            payload[payload_key] = alert_json[json_key]
+    for col_key in ("src_mac", "dst_mac", "bssid"):
+        if row.get(col_key):
+            payload[col_key] = str(row[col_key])
+
     return {
         "ts": ts,
         "source": SOURCE_KISMET_ALERTS,
@@ -262,10 +297,7 @@ def normalize_alert_row(
         "cycle_id": cycle_id,
         "source_ref": f"kismet:{db_ref}:alerts:{locator}",
         "input_digest": input_digest(dict(row)),
-        "payload": {
-            "header": header,
-            "text": alert_text,
-        },
+        "payload": payload,
         "session_id": session_id,
     }
 
@@ -374,6 +406,7 @@ def ingest_kismet_cycle(
     session_id: Optional[str] = None,
     since_ts: float = 0.0,
     gps_fix: Optional[Mapping] = None,
+    watermark_saver: Optional[Callable[[float], None]] = None,
 ) -> List[int]:
     """Normalize and persist one analysis cycle from a Kismet capture DB.
 
@@ -384,10 +417,17 @@ def ingest_kismet_cycle(
     optional ``gps_fix`` mapping (``lat``, ``lon``, ``ts``, ``accuracy_m``)
     records the operator fix for the same cycle.
 
+    ``watermark_saver`` (optional) is called with the epoch second just past
+    the newest capture row READ — max ingested ts + 1 — inside the same
+    transaction, so a restart never re-records history. It mirrors the
+    detector watermarks' semantics: rows skipped as malformed are consumed
+    and never retried.
+
     Returns the persisted observation ids.
     """
     ref = db_ref(db_path)
     records: List[Optional[dict]] = []
+    max_seen: Optional[float] = None
 
     try:
         device_rows = ro_conn.execute(
@@ -399,6 +439,9 @@ def ingest_kismet_cycle(
             (since_ts,),
         ).fetchall()
         for row in device_rows:
+            row_ts = _as_float(row["last_time"])
+            if row_ts is not None:
+                max_seen = row_ts if max_seen is None else max(max_seen, row_ts)
             records.append(
                 normalize_device_row(
                     {
@@ -424,6 +467,9 @@ def ingest_kismet_cycle(
             (since_ts,),
         ).fetchall()
         for row in alert_rows:
+            row_ts = _as_float(row["ts_sec"])
+            if row_ts is not None:
+                max_seen = row_ts if max_seen is None else max(max_seen, row_ts)
             records.append(
                 normalize_alert_row(
                     {
@@ -456,4 +502,99 @@ def ingest_kismet_cycle(
         )
 
     with store.transaction():
-        return _ingest_rows(store, records, f"cycle={cycle_id}")
+        ids = _ingest_rows(store, records, f"cycle={cycle_id}")
+        if watermark_saver is not None and max_seen is not None:
+            watermark_saver(float(max_seen) + 1.0)
+        return ids
+
+
+# Runtime-state key holding the observation ingest watermark: the epoch
+# second just past the newest capture row durably recorded (max ingested
+# ts + 1), so a restart never re-records history — the same semantics as
+# the detector watermarks in rf_plugins.
+OBSERVATION_WATERMARK_KEY = "observation_watermark_ts"
+
+
+class CycleObsIndex:
+    """Provenance index over one cycle's persisted observations (B6).
+
+    Built right after ``ingest_kismet_cycle`` records the cycle's capture
+    rows; the detector evidence builders consult it to fill
+    ``EvidenceLine.obs_ids`` with the observation rows that produced the
+    detection. Lookups only ever match observations from that cycle.
+    """
+
+    def __init__(self, rows: Sequence[Mapping]) -> None:
+        self._by_identity: Dict[str, List[int]] = {}
+        self._alerts: List[Tuple[float, str, int]] = []
+        for row in rows:
+            obs_id = int(row["id"])
+            identity = str(row["identity_key"]).upper()
+            self._by_identity.setdefault(identity, []).append(obs_id)
+            if row["source"] == SOURCE_KISMET_ALERTS:
+                self._alerts.append((float(row["ts"]), identity, obs_id))
+
+    @classmethod
+    def for_cycle(cls, store: Any, cycle_id: int) -> "CycleObsIndex":
+        """Index the observations recorded in ``cycle_id`` (read-only SQL)."""
+        rows = store.conn.execute(
+            "SELECT id, ts, source, identity_key FROM observations "
+            "WHERE cycle_id = ?",
+            (int(cycle_id),),
+        ).fetchall()
+        return cls(rows)
+
+    def ids_for_identity(self, identity_key: str) -> Tuple[int, ...]:
+        """Observation ids recorded this cycle for one radio identity."""
+        return tuple(self._by_identity.get(str(identity_key).upper(), ()))
+
+    def ids_for_alert_ts(
+        self, ts: float, macs: Sequence[str] = ()
+    ) -> Tuple[int, ...]:
+        """Alert observation ids at ``ts``, narrowed to ``macs`` when given.
+
+        ``normalize_alert_row`` resolves the identity from ``src_mac`` first,
+        so a deauth event matches on its source MAC. When no mac-matched id
+        exists at that second (an alert whose identity resolved from a
+        different field), the whole ts bucket is returned — a documented
+        superset that still contains the producing row.
+        """
+        ts_f = float(ts)
+        candidates = [oid for (t, _ident, oid) in self._alerts if t == ts_f]
+        if not candidates:
+            return ()
+        macs_u = {str(m).upper() for m in macs if m}
+        if macs_u:
+            by_mac = [
+                oid
+                for (t, ident, oid) in self._alerts
+                if t == ts_f and ident in macs_u
+            ]
+            if by_mac:
+                return tuple(sorted(set(by_mac)))
+        return tuple(sorted(set(candidates)))
+
+
+def attach_obs_ids(
+    result: DetectionResult, obs_ids: Sequence[int]
+) -> DetectionResult:
+    """Fill a DetectionResult's empty evidence obs_ids from the cycle index (B6).
+
+    Pure: results are frozen, so a new result is returned. Lines that
+    already carry obs_ids keep them; an empty ``obs_ids`` leaves the
+    result untouched, so callers can enrich unconditionally.
+    """
+    ids = tuple(int(i) for i in obs_ids)
+    if not ids:
+        return result
+
+    def _filled(line: EvidenceLine) -> EvidenceLine:
+        if line.obs_ids:
+            return line
+        return replace(line, obs_ids=ids)
+
+    return replace(
+        result,
+        evidence=tuple(_filled(line) for line in result.evidence),
+        contra=tuple(_filled(line) for line in result.contra),
+    )

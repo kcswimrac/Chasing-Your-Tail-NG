@@ -339,7 +339,7 @@ class FakeGps:
             return self.last_fix
         return None
 
-    def score_cotravel(self, now):
+    def score_cotravel(self, now=None, obs_index=None):
         return []
 
 

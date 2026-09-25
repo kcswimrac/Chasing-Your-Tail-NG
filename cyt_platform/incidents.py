@@ -42,6 +42,10 @@ class IncidentDeduper:
         self.baseline = baseline
         self.place_id = place_id
         self._buffer: List[Any] = []
+        # B6: per-cycle provenance index (set by the service before flush);
+        # when present, window-match evidence cites the subject's observation
+        # ids recorded this cycle.
+        self.obs_index: Optional[Any] = None
 
     def set_place(self, place_id: Optional[str]) -> None:
         self.place_id = place_id
@@ -95,6 +99,13 @@ class IncidentDeduper:
             baselined=baselined,
             suppressed=suppressed,
         )
+        # B6: cite the observations recorded this cycle for the subject —
+        # the device rows the window matcher consumed. Only when the index
+        # found some: empty would claim pointers that do not exist.
+        if self.obs_index is not None:
+            obs_ids = self.obs_index.ids_for_identity(subject)
+            if obs_ids:
+                evidence["obs_ids"] = list(obs_ids)
 
         detail = {
             "window": window,
@@ -817,11 +828,13 @@ def _row_evidence_lines(
 
     raw = row.get("evidence_json")
     block = None
+    parsed: Any = None
     if raw:
         try:
-            parsed = json.loads(raw)
-            if isinstance(parsed, dict):
-                block = parsed.get("fusion")
+            loaded = json.loads(raw)
+            if isinstance(loaded, dict):
+                parsed = loaded
+                block = loaded.get("fusion")
         except json.JSONDecodeError:
             block = None
     if block and (block.get("why") or block.get("against")):
@@ -844,6 +857,12 @@ def _row_evidence_lines(
             for c in block.get("against") or []
         )
         return why, against
+    # B6: paths without a fusion block (window-match, ie_relink) carry their
+    # provenance as a top-level obs_ids list — carry it into the line so the
+    # phenomenon's fused evidence keeps pointing at the producing rows.
+    fallback_obs = tuple(parsed.get("obs_ids") or ()) if isinstance(parsed, dict) else ()
     return (
-        EvidenceLine(str(row["event_type"]), str(row["summary"])),
+        EvidenceLine(
+            str(row["event_type"]), str(row["summary"]), obs_ids=fallback_obs
+        ),
     ), ()

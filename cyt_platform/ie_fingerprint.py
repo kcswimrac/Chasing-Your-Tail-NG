@@ -259,8 +259,17 @@ class IEFingerprintEngine:
             min_support=int(cfg.get("min_support", MIN_SUPPORT_FOR_LINK)),
         )
 
-    def process_devices(self, devices: List[dict], now: Optional[float] = None) -> int:
+    def process_devices(
+        self,
+        devices: List[dict],
+        now: Optional[float] = None,
+        obs_index: Optional[Any] = None,
+    ) -> int:
         """Extract, score, and persist identity hypotheses for one cycle.
+
+        ``obs_index`` (B6) is the cycle's provenance index; when given, the
+        relink evidence cites the cycle's device observations for every MAC
+        the fingerprint roster joins.
 
         Returns the number of newly linked entity↔fingerprint rows (first
         sightings), matching the previous contract of this method.
@@ -291,7 +300,7 @@ class IEFingerprintEngine:
 
         if current:
             self._score_pairs(current, now)
-            self._emit_relink_incidents(current, session_id, now)
+            self._emit_relink_incidents(current, session_id, now, obs_index=obs_index)
         return links
 
     # -- scoring ----------------------------------------------------------------
@@ -444,12 +453,20 @@ class IEFingerprintEngine:
 
     # -- incident emission --------------------------------------------------------
 
-    def _emit_relink_incidents(self, current: Dict[str, dict], session_id: str, now: float) -> None:
+    def _emit_relink_incidents(
+        self,
+        current: Dict[str, dict],
+        session_id: str,
+        now: float,
+        obs_index: Optional[Any] = None,
+    ) -> None:
         """One ie_relink incident per fingerprint joined by LINKED hypotheses.
 
         Severity maps from the strongest supporting hypothesis score via
         ``identity.relink_severity``; evidence carries hypothesis ids and
-        counts — never MAC or SSID text.
+        counts — never MAC or SSID text. B6: when the cycle index is given,
+        evidence also carries the observation ids recorded this cycle for
+        the roster MACs.
         """
         reported: Set[int] = set()
         for mac, info in current.items():
@@ -469,6 +486,29 @@ class IEFingerprintEngine:
             best = max(pair_scores, key=lambda h: h["confidence"])
             confidence = float(best["confidence"])
             severity = relink_severity(confidence, best["reasons"])
+            obs_ids: List[int] = []
+            if obs_index is not None:
+                obs_ids = sorted(
+                    {
+                        oid
+                        for joined in macs
+                        for oid in obs_index.ids_for_identity(joined)
+                    }
+                )
+            evidence: Dict[str, Any] = {
+                "kind": "ie_relink",
+                "subject_fp": info["hash"][:16],
+                "reasons": list(best["reasons"][:4])
+                + [
+                    f"stored hypotheses: {len(pair_scores)} linked pair(s)",
+                    f"severity {severity} mapped from confidence {confidence:.2f}",
+                ],
+                "hypothesis_ids": [h["hypothesis_id"] for h in pair_scores[:5]],
+            }
+            # B6: cite the cycle's observations only when the index found
+            # some — an empty key would claim pointers that do not exist.
+            if obs_ids:
+                evidence["obs_ids"] = obs_ids
             try:
                 self.store.observe_incident(
                     event_type="ie_relink",
@@ -487,16 +527,7 @@ class IEFingerprintEngine:
                         "hypothesis_count": len(pair_scores),
                     },
                     entity_type="fingerprint",
-                    evidence={
-                        "kind": "ie_relink",
-                        "subject_fp": info["hash"][:16],
-                        "reasons": list(best["reasons"][:4])
-                        + [
-                            f"stored hypotheses: {len(pair_scores)} linked pair(s)",
-                            f"severity {severity} mapped from confidence {confidence:.2f}",
-                        ],
-                        "hypothesis_ids": [h["hypothesis_id"] for h in pair_scores[:5]],
-                    },
+                    evidence=evidence,
                 )
             except Exception as exc:
                 logger.warning("ie_relink incident persist failed: %s", sanitize_error(exc))

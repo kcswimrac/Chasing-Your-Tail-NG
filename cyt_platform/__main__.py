@@ -144,6 +144,34 @@ def build_parser() -> argparse.ArgumentParser:
             help="Path to config.json (same as the top-level flag)",
         )
 
+    ex = sub.add_parser(
+        "export",
+        help="Export persisted observations as a replayable scenario (B6)",
+    )
+    ex.add_argument(
+        "--out",
+        default=None,
+        help="Write the scenario JSON to this path (default: stdout)",
+    )
+    ex.add_argument(
+        "--since",
+        default=None,
+        metavar="EPOCH_S",
+        help="Only observations at/after this epoch second",
+    )
+    ex.add_argument(
+        "--until",
+        default=None,
+        metavar="EPOCH_S",
+        help="Only observations at/before this epoch second",
+    )
+    ex.add_argument(
+        "--scenario-id",
+        default=None,
+        help="scenario_id for the exported document (default: export-<session>)",
+    )
+    _config_flag(ex)
+
     st = sub.add_parser(
         "status", help="One-glance system status (status.json + store counts)"
     )
@@ -269,6 +297,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "replay":
         return _replay_cmd(args)
 
+    if args.cmd == "export":
+        return _export_cmd(args)
+
     if args.cmd == "eval":
         return _eval_cmd(args)
 
@@ -312,6 +343,50 @@ def _eval_cmd(args) -> int:
     else:
         sys.stdout.buffer.write(data + b"\n")
     return code
+
+
+def _export_cmd(args) -> int:
+    """B6: persist observations -> v1 scenario document a replay can run."""
+    import json
+    from pathlib import Path
+
+    from cyt_platform.privacy import apply_umask
+    from cyt_platform.replay.scenario import scenario_from_observations
+    from cyt_platform.store import CytStore
+
+    config, err = _load_config_or_exit(args.config)
+    if err:
+        return err
+    apply_umask(config)
+    try:
+        since = float(args.since) if args.since else None
+        until = float(args.until) if args.until else None
+    except ValueError:
+        print("export: --since/--until must be epoch seconds", file=sys.stderr)
+        return 2
+    store = CytStore.open(config.get("store") or {})
+    try:
+        doc = scenario_from_observations(
+            store,
+            since_ts=since,
+            until_ts=until,
+            scenario_id=args.scenario_id,
+        )
+    finally:
+        store.close()
+    if not doc["cycles"]:
+        print(
+            "export: no observations in range — nothing to export",
+            file=sys.stderr,
+        )
+        return 1
+    data = json.dumps(doc, indent=2).encode("utf-8")
+    if args.out:
+        Path(args.out).write_bytes(data)
+        print(f"export: wrote {args.out}", file=sys.stderr)
+    else:
+        sys.stdout.buffer.write(data + b"\n")
+    return 0
 
 
 def _replay_cmd(args) -> int:

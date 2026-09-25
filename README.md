@@ -109,6 +109,14 @@ cyt incident reopen <key> --reason "still seeing it"  # terminal states only
 # against eval/gates.json (exit 0 pass, 1 gate failure, 2 harness/gates error)
 cyt replay --session scenarios/replay/commute-quiet.json
 cyt eval
+
+# Export persisted observations as a replayable scenario document (B6):
+# replay the export with `cyt replay --session <out>` and compare the
+# incidents against the live run. Alert and BLE detection data survive the
+# export; probe-SSID text was never recorded, and detections that depend on
+# operator config (trusted APs, protected MACs) must be re-supplied via
+# config_overrides on the exported document.
+cyt export --out /tmp/session.json --since 1779000000 --until 1779086400
 ```
 
 ### P1 Trust (encryption, baseline, LED, wipe)

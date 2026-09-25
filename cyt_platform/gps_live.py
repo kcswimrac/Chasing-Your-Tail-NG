@@ -419,7 +419,11 @@ class LiveGpsFusion:
         self.store.set_runtime("last_gps_cluster", operator_anchor.cluster_id)
         return best
 
-    def score_cotravel(self, now: Optional[float] = None) -> List[dict]:
+    def score_cotravel(
+        self,
+        now: Optional[float] = None,
+        obs_index: Optional[Any] = None,
+    ) -> List[dict]:
         """Score entities co-present with the operator at distinct places.
 
         Co-travel requires the operator's own path: an entity is scored
@@ -428,6 +432,10 @@ class LiveGpsFusion:
         operator visits. A device seen at two places the operator never
         visited does not co-travel — this is the audit's docstring-lie
         fix, where the SQL counted cells with no operator join at all.
+
+        ``obs_index`` (B6) is the cycle's provenance index; when given, the
+        emitted result's evidence lines cite the subject's located device
+        observations recorded this cycle.
 
         Sightings are read from canonical observations via the CytStore
         API only. Writes/updates the cotravel table and returns scored
@@ -570,6 +578,12 @@ class LiveGpsFusion:
             # Raise durable incident for high co-travel
             if score >= float(self.cfg.get("incident_score_threshold") or 0.55):
                 result = _cotravel_result(key, locs, score, detail, now)
+                # B6: cite this cycle's located device observations for the
+                # co-traveling subject (obs is lazily imported above).
+                if obs_index is not None:
+                    result = obs.attach_obs_ids(
+                        result, obs_index.ids_for_identity(key)
+                    )
                 fields = incident_fields(
                     result,
                     session_id=self.store.get_runtime("session_id") or "gps",

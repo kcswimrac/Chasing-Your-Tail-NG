@@ -7,7 +7,7 @@ import os
 import signal
 import sys
 import time
-from typing import Optional
+from typing import Callable, Optional
 
 from cyt_platform import notify
 from cyt_platform.baseline import BaselineEngine, resolve_place
@@ -15,8 +15,14 @@ from cyt_platform.config import ensure_runtime_dirs, load_json
 from cyt_platform.health import ComponentFailureRegistry
 from cyt_platform.incidents import IncidentEngine
 from cyt_platform.kismet_resolve import KismetDbResolver
+from cyt_platform.kismet_ro import connect_readonly
 from cyt_platform.logging_setup import setup_logging
 from cyt_platform.monitor_adapter import build_monitor
+from cyt_platform.observations import (
+    OBSERVATION_WATERMARK_KEY,
+    CycleObsIndex,
+    ingest_kismet_cycle,
+)
 from cyt_platform.privacy import (
     apply_umask,
     log_fde_notice_if_needed,
@@ -76,6 +82,31 @@ def _sleep_remaining(interval: float, t0: float) -> None:
     while time.monotonic() < end and not _shutdown:
         time.sleep(min(1.0, end - time.monotonic()))
         notify.watchdog()
+
+
+# B6: observations carry a persisted watermark like the detector watermarks,
+# but reads never reach further back than this catch-up bound — a long outage
+# must not re-ingest an unbounded capture history into the observation store.
+OBSERVATION_CATCHUP_S = 1800.0
+
+
+def _obs_since_ts(store: CytStore, now: float) -> float:
+    """Observation ingest watermark with a bounded catch-up window."""
+    raw = store.get_runtime(OBSERVATION_WATERMARK_KEY)
+    try:
+        watermark = float(raw) if raw is not None else 0.0
+    except (TypeError, ValueError):
+        watermark = 0.0
+    return max(watermark, now - OBSERVATION_CATCHUP_S)
+
+
+def _save_obs_watermark(store: CytStore) -> Callable[[float], None]:
+    """Watermark saver joining the ingest's open store transaction."""
+
+    def _save(ts: float) -> None:
+        store.set_runtime(OBSERVATION_WATERMARK_KEY, str(ts))
+
+    return _save
 
 
 def run(
@@ -194,6 +225,9 @@ def run(
                 db_path = resolver.resolve()
                 kismet_label = os.path.basename(db_path) if basename_only else db_path
                 monitor.current_kismet_db = kismet_label
+                # B6: this cycle's provenance index; set by the ingest below
+                # and consumed by the detector emit paths and the deduper.
+                obs_index: Optional[CycleObsIndex] = None
 
                 with SecureKismetDB(db_path, read_only=True) as kdb:
                     if not kdb.validate_connection():
@@ -235,8 +269,38 @@ def run(
                     rf_stats = {}
                     try:
                         with store.transaction():
+                            # B6: persist this cycle's capture observations in
+                            # the same transaction as the incidents that will
+                            # cite them — evidence never points at rows that
+                            # failed to persist. Watermarked like the detector
+                            # watermarks, so a restart never re-records
+                            # history; ingest failure must not blind the
+                            # detectors, so it is contained here.
+                            try:
+                                ro = connect_readonly(db_path)
+                                try:
+                                    ingest_kismet_cycle(
+                                        store,
+                                        ro,
+                                        cycle_id=cycle,
+                                        db_path=db_path,
+                                        session_id=session_id,
+                                        since_ts=_obs_since_ts(store, now),
+                                        watermark_saver=_save_obs_watermark(store),
+                                    )
+                                finally:
+                                    ro.close()
+                                obs_index = CycleObsIndex.for_cycle(store, cycle)
+                            except Exception as ing:
+                                log.warning(
+                                    "Observation ingest failed: %s",
+                                    sanitize_error(ing),
+                                )
                             rf_stats = rf.run_cycle(
-                                kdb, db_path, recent_window_s=max(check_interval, 120)
+                                kdb,
+                                db_path,
+                                recent_window_s=max(check_interval, 120),
+                                obs_index=obs_index,
                             )
                     except Exception as rfe:
                         # Total RF-plugin failure must be visible in status:
@@ -257,6 +321,8 @@ def run(
                         config, lat=g.get("lat"), lon=g.get("lon"), now=now
                     )
                 deduper.set_place(place_id)
+                # B6: window matches cite this cycle's ingested observations.
+                deduper.obs_index = obs_index
                 if place_id:
                     store.set_runtime("current_place", place_id)
                     # Write-only today: seeds the sticky last-known-place
