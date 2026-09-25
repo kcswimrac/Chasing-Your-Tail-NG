@@ -917,9 +917,10 @@ class CytStore:
     ) -> Tuple[int, bool]:
         """Find-or-create the phenomenon incident for ``incident_key``.
 
-        Session-independent: the key is phenomenon-based (class + subject),
-        never session-scoped, so a restart rehydrates the SAME incident —
-        the D2 replacement for session-scoped keys. On creation the row
+        Session-independent: the key is subject-based (one phenomenon per
+        subject, regardless of which detector fired), never session-scoped,
+        so a restart rehydrates the SAME incident — the D2 replacement for
+        session-scoped keys. On creation the row
         starts at lifecycle NEW with an opening timeline row (NULL -> new)
         and an ``incident_opened`` audit event.
         """
@@ -1029,10 +1030,11 @@ class CytStore:
             ),
         )
         row = self.conn.execute(
-            "SELECT entity_id, severity, session_id FROM incidents WHERE id=?",
+            "SELECT incident_key, entity_id, severity, session_id FROM incidents WHERE id=?",
             (plan.incident_id,),
         ).fetchone()
         detail = {
+            "incident_key": row["incident_key"],
             "from": plan.from_state.value,
             "to": plan.to_state.value,
             "confidence": plan.confidence,
@@ -1085,6 +1087,60 @@ class CytStore:
             "UPDATE incidents SET last_seen=MAX(last_seen, ?) WHERE id=?",
             (float(ts), incident_id),
         )
+
+    def record_contribution(
+        self,
+        incident_id: int,
+        detector: str,
+        evidence_class: str,
+        ts: float,
+        detail: Optional[dict] = None,
+    ) -> None:
+        """Upsert one detector's contribution to a phenomenon incident.
+
+        A contribution is a cumulative fact about the phenomenon, not a
+        per-cycle event: the same (incident, detector, evidence class)
+        recurring across cycles extends the window (hits + 1, last_ts
+        moves forward) instead of duplicating. The first detail sticks —
+        later details ride on the detector rows and the timeline.
+        """
+        self.conn.execute(
+            """
+            INSERT INTO incident_contributions(
+              incident_id, detector, evidence_class, hits, first_ts, last_ts, detail_json
+            ) VALUES (?, ?, ?, 1, ?, ?, ?)
+            ON CONFLICT(incident_id, detector, evidence_class)
+            DO UPDATE SET hits=hits+1, last_ts=MAX(last_ts, excluded.last_ts)
+            """,
+            (
+                incident_id,
+                detector,
+                evidence_class,
+                float(ts),
+                float(ts),
+                json.dumps(detail, sort_keys=True) if detail is not None else None,
+            ),
+        )
+
+    def list_incident_contributions(self, incident_id: int) -> List[dict]:
+        """The incident's detector contributions, deterministic order."""
+        rows = self.conn.execute(
+            """
+            SELECT detector, evidence_class, hits, first_ts, last_ts, detail_json
+            FROM incident_contributions WHERE incident_id = ?
+            ORDER BY detector, evidence_class
+            """,
+            (incident_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def count_incident_contributions(self, incident_id: int) -> int:
+        """Distinct (detector, evidence-class) contributions recorded so far."""
+        row = self.conn.execute(
+            "SELECT COUNT(*) AS c FROM incident_contributions WHERE incident_id=?",
+            (incident_id,),
+        ).fetchone()
+        return int(row["c"])
 
     def append_incident_note(
         self,

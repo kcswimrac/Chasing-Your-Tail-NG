@@ -382,13 +382,42 @@ def test_engine_config_validation():
     assert engine.cfg["watch_confidence"] == INCIDENTS_V2_DEFAULTS["watch_confidence"]
 
 
-def test_unknown_event_types_never_merge(store: CytStore):
-    """Conservative default: event types outside the class map each get
-    their own phenomenon — no accidental cross-detector merging."""
+def test_unknown_event_types_merge_by_subject(store: CytStore):
+    """Subject-keyed merging is universal: even event types outside the
+    known set merge on the same subject (one explained case), while
+    different subjects never share a phenomenon — no accidental
+    cross-subject merging either way."""
     _emit(store, _result("mystery_detector", "mystery_kind"))
     _emit(store, _result("other_detector", "other_kind"))
+    _emit(store, _result("third_detector", "third_kind", subject="AA:BB:CC:00:00:43"))
     _engine(store).apply(now=T0)
     rows = store.conn.execute(
-        "SELECT incident_key FROM incidents WHERE phenomenon_key IS NOT NULL ORDER BY incident_key"
+        """SELECT i.incident_key, e.key AS entity_key
+           FROM incidents i JOIN entities e ON e.id = i.entity_id
+           WHERE i.phenomenon_key IS NOT NULL ORDER BY i.incident_key"""
     ).fetchall()
-    assert len(rows) == 2
+    assert len(rows) == 2  # one per SUBJECT, not per event type
+    merged = store.list_incident_contributions(
+        store.conn.execute(
+            """SELECT i.id FROM incidents i JOIN entities e ON e.id = i.entity_id
+               WHERE i.phenomenon_key IS NOT NULL AND e.key='AA:BB:CC:00:00:42'"""
+        ).fetchone()["id"]
+    )
+    assert {(c["detector"], c["evidence_class"]) for c in merged} == {
+        ("mystery_detector", "mystery_detector"),
+        ("other_detector", "other_detector"),
+    }
+
+
+def test_contributions_are_cumulative_not_per_cycle(store: CytStore):
+    """The same detector recurring across cycles extends its contribution
+    (hits + window), it does not duplicate rows."""
+    for at in (T0, T0 + 10, T0 + 20):
+        _emit(store, _result("mac_reappear", "window_match", observed_at=at))
+        _engine(store).apply(now=at)
+    row = _phenomenon(store)
+    contributions = store.list_incident_contributions(row["id"])
+    assert len(contributions) == 1
+    assert contributions[0]["hits"] == 3
+    assert contributions[0]["first_ts"] == pytest.approx(T0)
+    assert contributions[0]["last_ts"] == pytest.approx(T0 + 20)

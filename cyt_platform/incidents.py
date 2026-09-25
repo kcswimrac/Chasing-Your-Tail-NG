@@ -345,35 +345,21 @@ INCIDENTS_V2_DEFAULTS: Dict[str, Any] = {
     # evidence inside this window is noted on the timeline but does not
     # re-flag the subject; after it, evidence reopens as NEW.
     "reopen_disposition_s": 604800.0,  # 7 days
-    # Detector event_type -> phenomenon class. Same class + same subject =
-    # one phenomenon (window + co-travel on one MAC merge; the spec's
-    # merge rule). Unknown event types map to their own class — never
-    # merged with anything else (conservative by default).
-    "phenomenon_classes": {
-        "mac_reappear": "tracking",
-        "ssid_probe_repeat": "tracking",
-        "cotravel": "tracking",
-        "ble_tracker": "tracking",
-        "ie_relink": "tracking",
-        "deauth_attack": "attack",
-        "rogue_ap": "attack",
-    },
 }
 
 CURSOR_RUNTIME_KEY = "incidents_v2_cursor"
 
 
-def phenomenon_key_for(
-    event_type: str, subject_type: str, subject: str, classes: Dict[str, str]
-) -> str:
-    """The session-independent phenomenon key (subject + detector-class).
+def phenomenon_key_for(subject_type: str, subject: str) -> str:
+    """The session-independent phenomenon key: the SUBJECT, nothing else.
 
-    Deliberately excludes window label and session id: a phenomenon spans
-    detection windows and restarts. Unknown event types get a class of
-    their own so unrelated detectors never merge by accident.
+    Deliberately excludes event type, window label, and session id — the
+    spec's merge invariant is one phenomenon per subject (window-match +
+    co-travel + IE on one MAC is ONE explained case, not three incidents).
+    Cross-identity unification (two MACs, one device) is the identity
+    layer's job (D3 hypotheses), not the key's.
     """
-    pclass = classes.get(event_type, f"solo:{event_type}")
-    return f"ph:{pclass}:{subject_type}:{subject}"
+    return f"ph:{subject_type}:{subject}"
 
 
 class IncidentEngine:
@@ -512,7 +498,18 @@ class IncidentEngine:
             # Evidence time moves the staleness clock, never the
             # transitions themselves (touch, don't let state moves
             # defer staleness).
-            self.store.touch_incident(int(existing["id"]), freshest)
+            incident_id = int(existing["id"])
+            self.store.touch_incident(incident_id, freshest)
+            # Every detector row in the group is a recorded contribution
+            # (cumulative upsert) — the incident's “who contributed what”
+            # ledger, and the corroboration memory across cycles.
+            for r in group_rows:
+                self.store.record_contribution(
+                    incident_id,
+                    str(r["event_type"]),
+                    str(r["event_type"]),
+                    float(r["last_seen"]),
+                )
             assessment = self._fuse_group(group_rows)
             if assessment is not None:
                 plans.extend(
@@ -529,12 +526,9 @@ class IncidentEngine:
         self.store.set_runtime(CURSOR_RUNTIME_KEY, repr(max(now, newest)))
 
     def _group_by_phenomenon(self, rows: List[dict]) -> Dict[str, List[dict]]:
-        classes = self.cfg["phenomenon_classes"]
         groups: Dict[str, List[dict]] = {}
         for row in rows:
-            key = phenomenon_key_for(
-                row["event_type"], row["entity_type"], row["entity_key"], classes
-            )
+            key = phenomenon_key_for(row["entity_type"], row["entity_key"])
             groups.setdefault(key, []).append(row)
         return groups
 
@@ -600,7 +594,14 @@ class IncidentEngine:
         )
         gated = alert_gate(assessment, proposed)
         distinct_detectors = len(set(assessment.detectors))
-        corroborated = len(rows) >= 2 or confidence >= watch_conf
+        # Corroboration (NEW -> OBSERVING): a second DetectionResult in this
+        # group, confidence already at the watch bar, or a cumulative second
+        # contribution from an earlier cycle (the ledger outlives cycles).
+        corroborated = (
+            len(rows) >= 2
+            or confidence >= watch_conf
+            or self.store.count_incident_contributions(int(existing["id"])) >= 2
+        )
 
         if gated == "alert":
             desired = (

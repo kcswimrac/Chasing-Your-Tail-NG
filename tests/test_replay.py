@@ -194,6 +194,92 @@ def test_device_row_scenarios_deterministic(tmp_path):
         assert report_bytes(run_a) == report_bytes(run_b), name
 
 
+def test_lifecycle_scenarios_deterministic(tmp_path):
+    """Engine-enabled scenarios are deterministic too: phenomenon rows,
+    transitions, and contributions carry no wall-clock or hash-ordering
+    leakage (same input + scenario clock -> byte-identical report)."""
+    for name in ("cotravel-deauth-merge",):
+        path = SCENARIOS / f"{name}.json"
+        run_a = run_scenario(path, tmp_path / f"{name}-a")
+        run_b = run_scenario(path, tmp_path / f"{name}-b")
+        assert report_bytes(run_a) == report_bytes(run_b), name
+
+
+# --- D2 lifecycle: same-subject merge ------------------------------------------
+
+
+def test_merge_scenario_one_incident_two_contributions(tmp_path):
+    """The D2 acceptance scenario: co-travel AND deauth evidence on the same
+    MAC must produce ONE phenomenon incident with TWO contributions from
+    different evidence classes, escalated stepwise on the fused confidence —
+    and the merge is the lifecycle engine's doing (engine off = two separate
+    detector incidents)."""
+    from cyt_platform.store import CytStore
+
+    path = SCENARIOS / "cotravel-deauth-merge.json"
+    store_path = tmp_path / "cyt.db"
+    report = run_scenario(path, tmp_path)
+
+    phenomena = [
+        i for i in report["incidents"] if i["event_type"] == "phenomenon"
+    ]
+    follower = [p for p in phenomena if p["entity_key"] == "AA:BB:CC:00:00:99"]
+    assert len(follower) == 1, phenomena  # one phenomenon for the subject
+    assert follower[0]["incident_key"] == "ph:wifi_mac:AA:BB:CC:00:00:99"
+    assert follower[0]["severity"] == "watch"  # stepwise: alert gate demotes
+    assert follower[0]["status"] == "open"
+
+    # Contributions persist through the store API (not in the legacy report
+    # view): cotravel + deauth, different evidence classes, one incident.
+    store = CytStore.open({"path": str(store_path), "mode": "durable"})
+    try:
+        row = store.get_incident_by_key("ph:wifi_mac:AA:BB:CC:00:00:99")
+        assert row is not None
+        contributions = store.list_incident_contributions(int(row["id"]))
+        assert {c["detector"] for c in contributions} == {
+            "cotravel",
+            "deauth_attack",
+        }
+        # Timeline: opened -> observing -> watch (fused confidence drove
+        # every step; the deauth-only assessment was alert-gated to watch).
+        states = [
+            (t["from_state"], t["to_state"])
+            for t in store.list_incident_timeline(int(row["id"]))
+        ]
+        assert states == [
+            (None, "new"),
+            ("new", "observing"),
+            ("observing", "watch"),
+        ]
+        # Audit events exist for the opening and every transition.
+        kinds = [e["event_type"] for e in report["events"]]
+        assert "incident_opened" in kinds
+        assert kinds.count("incident_transition") >= 2
+    finally:
+        store.close()
+
+
+def test_merge_scenario_engine_off_files_separate_incidents(tmp_path):
+    """The contrast case: identical session with incidents_v2 disabled keeps
+    the pre-D2 behavior — cotravel and deauth are separate detector
+    incidents (the merge is the engine's, not an artifact of the scenario)."""
+    doc = json.loads((SCENARIOS / "cotravel-deauth-merge.json").read_text())
+    doc["config_overrides"].pop("incidents_v2")
+    doc["session_id"] = "replay-cotravel-deauth-merge-engine-off"
+    alt = tmp_path / "engine-off.json"
+    alt.write_text(json.dumps(doc))
+
+    report = run_scenario(alt, tmp_path)
+    kinds = {i["event_type"] for i in report["incidents"]}
+    assert "phenomenon" not in kinds
+    assert {i["event_type"] for i in report["incidents"]} >= {
+        "cotravel",
+        "deauth_attack",
+    }
+    # And no lifecycle summary key rides on engine-off cycles.
+    assert all("lifecycle_transitions" not in c for c in report["cycles"])
+
+
 # --- scenario validation ---------------------------------------------------------
 
 
