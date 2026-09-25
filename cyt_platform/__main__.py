@@ -134,6 +134,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Write the evaluation summary JSON to this path (default: stdout)",
     )
 
+    def _config_flag(sp):
+        # Accept -c on either side of the subcommand. SUPPRESS keeps the
+        # parent's value when the subcommand form is absent.
+        sp.add_argument(
+            "-c",
+            "--config",
+            default=argparse.SUPPRESS,
+            help="Path to config.json (same as the top-level flag)",
+        )
+
     ex = sub.add_parser(
         "export",
         help="Export persisted observations as a replayable scenario (B6)",
@@ -161,16 +171,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="scenario_id for the exported document (default: export-<session>)",
     )
     _config_flag(ex)
-
-    def _config_flag(sp):
-        # Accept -c on either side of the subcommand. SUPPRESS keeps the
-        # parent's value when the subcommand form is absent.
-        sp.add_argument(
-            "-c",
-            "--config",
-            default=argparse.SUPPRESS,
-            help="Path to config.json (same as the top-level flag)",
-        )
 
     st = sub.add_parser(
         "status", help="One-glance system status (status.json + store counts)"

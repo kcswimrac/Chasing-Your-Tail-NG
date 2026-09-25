@@ -525,5 +525,12 @@ def scenario_from_observations(
         "config_overrides": {},
         "cycles": cycles,
     }
+    if not cycles:
+        # The validator rejects cycle-less documents, so an empty window
+        # fails here with the actual reason instead.
+        raise ScenarioError(
+            "no replayable observations in the requested window — "
+            "the store recorded nothing to export"
+        )
     return doc
 
