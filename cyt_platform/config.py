@@ -102,6 +102,57 @@ DEFAULTS: Dict[str, Any] = {
         "enabled": True,
         "min_score": 0.5,
     },
+    "fusion": {
+        # D4 confidence fusion (locked decision 8: transparent, fixed,
+        # config-owned weights — no learned model). Supporting evidence
+        # lines combine by noisy-OR (monotone in evidence, saturating);
+        # contradicting lines multiply the support down, so every contra
+        # line strictly lowers confidence. A weight is the contribution of
+        # one fully-satisfied evidence line of that kind; every rendered
+        # number cites its evidence kind + line, so names must stay
+        # traceable to this table.
+        "min_independent_kinds": 2,
+        # Repetition alone never alerts (product principle): an alert
+        # needs at least this many DISTINCT independent evidence kinds.
+        # Repeats of the same kind still raise confidence but never
+        # satisfy this gate.
+        "max_confidence": 0.99,
+        # Evidence is never certainty: fused confidence caps here.
+        "default_weight": 0.10,
+        # Kinds missing from the weight table get this conservative
+        # contribution and never count as independent evidence (a new
+        # detector's kinds must be deliberately listed to gain
+        # alertability).
+        "self_ref_kinds": ["score"],
+        # Kinds that restate the detector's own computed conclusion rather
+        # than describe an observed phenomenon: they contribute weight but
+        # never count toward the independent-evidence alert gate.
+        "weights": {
+            # Observed deauth/disassoc management-frame pattern toward a
+            # target (Kismet alert-derived): a distinct RF attack class.
+            "deauth_pattern": 0.35,
+            # Attack type + frame-count signature: a separate classifier
+            # dimension of the same alert family.
+            "attack_signature": 0.20,
+            # The capture layer's own severity classification (Kismet is
+            # a trusted sensor per the EDC design doc).
+            "source_severity": 0.15,
+            # One Kismet rogue/evil-twin alert reason. All of an alert's
+            # reasons share this kind, so repeats never raise the
+            # independent-kind count.
+            "rogue_reason": 0.25,
+            # BLE tracker signal: name/manuf/metadata token match.
+            "ble_signal": 0.25,
+            # D5 location geometry: a distinct visit on the operator path.
+            "independent_visits": 0.30,
+            # The detector's own computed score (self-reference; weight
+            # only, never independent evidence).
+            "score": 0.10,
+            # Ambient density at the observation site — the canonical
+            # contra kind: crowded places discount tracking confidence.
+            "density": 0.06,
+        },
+    },
     "rf": {
         "deauth_enabled": True,
         "rogue_enabled": True,
