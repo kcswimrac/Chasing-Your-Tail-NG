@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 
 
+from conftest import escalate_lifecycle
 from cyt_platform.crypto import StoreKey, generate_key_file, seal_file, unseal_file
 from cyt_platform.store import CytStore
 
@@ -43,14 +44,12 @@ def test_encrypted_store_open_close(tmp_path: Path):
     store = CytStore.open(cfg)
     sid = store.begin_session()
     with store.transaction():
-        store.observe_incident(
-            event_type="mac_reappear",
-            subject="AA:BB:CC:DD:EE:FF",
-            window_label="15-20",
-            severity="alert",
+        escalate_lifecycle(
+            store,
+            "AA:BB:CC:DD:EE:FF",
+            time.time(),
+            "alert",
             session_id=sid,
-            observed_at=time.time(),
-            summary="t",
         )
     store.close()
 

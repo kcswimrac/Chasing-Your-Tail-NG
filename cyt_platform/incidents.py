@@ -316,10 +316,13 @@ _STATE_RANK: Dict[IncidentStatus, int] = {
 
 # Default knobs for the D2 engine (config section ``incidents_v2``). All
 # thresholds are config-owned with documented rationale — locked decision 8.
+#
+# There is no ``enabled`` key: the lifecycle is the only writer of incident
+# state and status derives from lifecycle rows only, so switching the engine
+# off would silently blind status (the exact "cannot detect looks like no
+# threat" failure the build exists to prevent). Evidence-first is the
+# product principle (locked decision 1), not an option.
 INCIDENTS_V2_DEFAULTS: Dict[str, Any] = {
-    # Opt-in: until a host enables the engine, live severities stay
-    # detector-owned exactly as before this build (D4 handoff note).
-    "enabled": False,
     # Fused confidence at/above which an OBSERVING incident becomes WATCH.
     "watch_confidence": 0.30,
     # Fused confidence at/above which WATCH may become ALERT (still gated
@@ -390,9 +393,18 @@ class IncidentEngine:
         self.store = store
         self._source_config = config or {}
         cfg = dict(INCIDENTS_V2_DEFAULTS)
-        raw = self._source_config.get("incidents_v2") or {}
-        if not isinstance(raw, dict):
+        raw = dict(self._source_config.get("incidents_v2") or {})
+        if not isinstance(self._source_config.get("incidents_v2") or {}, dict):
             raise ValueError("config['incidents_v2'] must be a mapping")
+        obsolete = raw.pop("enabled", None)
+        if obsolete is not None:
+            # The engine is always on since the evidence-first wiring (B1);
+            # fail loudly in logs rather than pretend a switch exists.
+            logger.warning(
+                "config incidents_v2.enabled is obsolete (engine is always on); "
+                "ignoring %r — remove the key",
+                obsolete,
+            )
         cfg.update(raw)
         self.cfg = cfg
         self._validate_cfg()
@@ -469,8 +481,19 @@ class IncidentEngine:
             # evidence time behind `now` — is picked up next cycle.
             return []
 
+        # Baseline-suppressed detector rows are noted-and-ignored: they
+        # advance the cursor (they have been consumed) but never open,
+        # touch, corroborate, or escalate a phenomenon. Status counts
+        # lifecycle rows only, so an unsuppressed phenomenon derived from
+        # a suppressed detector row would silently reintroduce the very
+        # alerts the baseline exists to prevent.
+        active = [r for r in rows if not r.get("suppressed")]
+
         plans: List[TransitionPlan] = []
-        groups = self._group_by_phenomenon(rows)
+        if not active:
+            self._advance_cursor(rows)
+            return []
+        groups = self._group_by_phenomenon(active)
         for key in sorted(groups):
             group_rows = groups[key]
             row0 = group_rows[0]

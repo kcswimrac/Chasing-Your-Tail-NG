@@ -30,6 +30,7 @@ from pathlib import Path
 
 import pytest
 
+from conftest import escalate_lifecycle
 from cyt_platform.ble_tracker import BLETrackerEngine, _ble_result, tracker_score
 from cyt_platform.debrief import generate_debrief
 from cyt_platform.logging_setup import setup_logging
@@ -273,6 +274,12 @@ def test_status_and_push_carry_no_plain_identifying_strings(tmp_path):
         assert hits >= 1
 
         status = StatusEngine(store, config)
+        # B2: detector rows no longer drive status severity — escalate the
+        # phenomenon so the surfaces are hot. The push policy (v1) only
+        # delivers on transition to alert, so the lifecycle row goes to
+        # ALERT; the redaction contract under test is unchanged.
+        with store.transaction():
+            escalate_lifecycle(store, ROGUE_BSSID, now, "alert", subject_type="wifi_ap")
         snap = status.publish(
             cycle=1,
             db_label="x.kismet",

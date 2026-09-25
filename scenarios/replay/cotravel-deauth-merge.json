@@ -1,7 +1,7 @@
 {
   "scenario_version": 1,
   "scenario_id": "cotravel-deauth-merge",
-  "description": "A device the operator sees at two distinct places (cycle 1 and cycle 2) is ALSO the target of a deauth burst in cycle 1. The D2 lifecycle engine (incidents_v2.enabled) must file ONE phenomenon incident for the subject with two contributions from different evidence classes and detectors (cotravel + deauth) and escalate it stepwise on the fused confidence. The operator's own device co-travels with itself by construction (operator self-identity is out of scope per the build spec), so it opens its own phenomenon. The deauth alert scan consumes its rows at the first scan (persisted watermark), one cycle before co-travel completes - so the phenomenon advances one detector per apply; escalation to alert with both detectors in a single apply is covered by the engine unit tests.",
+  "description": "A device the operator sees at two distinct places (cycle 1 and cycle 2) is ALSO the target of a deauth burst in cycle 1. The D2 lifecycle engine (always on — it owns incident state in production too) must file ONE phenomenon incident for the subject with two contributions from different evidence classes and detectors (cotravel + deauth) and escalate it stepwise on the fused confidence. The operator's own device co-travels with itself by construction (operator self-identity is out of scope per the build spec), so it opens its own phenomenon. The deauth alert scan consumes its rows at the first scan (persisted watermark), one cycle before co-travel completes - so the phenomenon advances one detector per apply; escalation to alert with both detectors in a single apply is covered by the engine unit tests.",
   "session_id": "replay-cotravel-deauth-merge",
   "labels": {
     "kind": "suspicious",
@@ -25,9 +25,6 @@
     },
     "deauth_detection": {
       "min_events_for_attack": 2
-    },
-    "incidents_v2": {
-      "enabled": true
     },
     "fusion": {
       "weights": {

@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from conftest import escalate_lifecycle
 from cyt_platform.status import StatusEngine
 from cyt_platform.store import CytStore
 
@@ -56,6 +57,8 @@ def test_alert_priority_and_invariant(env):
     sid = store.begin_session()
     now = time.time()
     with store.transaction():
+        # B2: detector rows are contributions, never severity owners — a
+        # watch and an alert detector row must not drive threat alone.
         store.observe_incident(
             event_type="mac_reappear",
             subject="AA:BB:CC:DD:EE:01",
@@ -77,6 +80,18 @@ def test_alert_priority_and_invariant(env):
         store.write_heartbeat("analyzer", ok=True, cycle=2)
     snap = engine.publish(
         cycle=2,
+        db_label="x.kismet",
+        freshness={"max_last_time": now, "recent_device_count": 2, "age_s": 1},
+        consecutive_fails=0,
+    )
+    assert snap["state"] == "clear"
+
+    # The lifecycle row is the severity owner: an ALERT phenomenon drives
+    # the threat state up the same ladder as before.
+    with store.transaction():
+        escalate_lifecycle(store, "AA:BB:CC:DD:EE:02", now, "alert", session_id=sid)
+    snap = engine.publish(
+        cycle=3,
         db_label="x.kismet",
         freshness={"max_last_time": now, "recent_device_count": 2, "age_s": 1},
         consecutive_fails=0,
@@ -110,15 +125,15 @@ def test_prior_session_open_affects_threat(env):
     store, engine, _ = env
     old_session = "deadbeef" * 4
     now = time.time()
+    # An open ALERT phenomenon from a prior session (session-independent
+    # phenomenon key) still holds the threat state after a restart.
     with store.transaction():
-        store.observe_incident(
-            event_type="mac_reappear",
-            subject="AA:BB:CC:DD:EE:99",
-            window_label="15-20",
-            severity="alert",
+        escalate_lifecycle(
+            store,
+            "AA:BB:CC:DD:EE:99",
+            now - 30,
+            "alert",
             session_id=old_session,
-            observed_at=now - 30,
-            summary="prior",
         )
         store.write_heartbeat("analyzer", ok=True, cycle=1)
     # new session for runtime

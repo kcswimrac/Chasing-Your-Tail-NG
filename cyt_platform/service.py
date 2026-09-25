@@ -13,6 +13,7 @@ from cyt_platform import notify
 from cyt_platform.baseline import BaselineEngine, resolve_place
 from cyt_platform.config import ensure_runtime_dirs, load_json
 from cyt_platform.health import ComponentFailureRegistry
+from cyt_platform.incidents import IncidentEngine
 from cyt_platform.kismet_resolve import KismetDbResolver
 from cyt_platform.logging_setup import setup_logging
 from cyt_platform.monitor_adapter import build_monitor
@@ -152,6 +153,12 @@ def run(
     )
     rf = RFPluginRunner(store, config, registry=health_registry)
     push = PushQueue(store, config)
+    # B1: the incident lifecycle + fusion alert gate run in production too.
+    # Detectors persist detection rows; the engine is the only writer of
+    # lifecycle state, and status derives from lifecycle rows only
+    # (locked decision 1). A mis-thresholded config fails loudly here,
+    # before the service can publish severity-static state.
+    engine = IncidentEngine(store, config)
     prev_state = "fail"
     last_gps_place = place_id
 
@@ -258,6 +265,18 @@ def run(
 
                 with store.transaction():
                     deduper.flush()
+                    # B1: one engine apply per cycle, after the detector
+                    # emissions and the deduper flush that persists the
+                    # window matches — the same detect → fuse → transition
+                    # order as the replay engine. Runs even when the RF
+                    # block failed above (the transaction is separate).
+                    transitions = engine.apply(now)
+                    if transitions:
+                        log.debug(
+                            "Incident engine cycle %s: %s transition(s)",
+                            cycle,
+                            len(transitions),
+                        )
                     store.close_stale_incidents(now, close_after)
                     store.write_heartbeat("analyzer", ok=True, cycle=cycle, detail="ok")
                     store.set_runtime("last_ok_ts", str(now))

@@ -709,8 +709,11 @@ def validate_config(cfg: dict) -> None:
     )
 
     # incidents_v2 — the lifecycle engine's thresholds (mirror the
-    # engine's own validation, with key + range in the message)
-    _bool(cfg, errors, "incidents_v2.enabled")
+    # engine's own validation, with key + range in the message). There is
+    # no ``enabled`` key: the engine is always on (B1) — a config that
+    # still carries the obsolete key now fails as an unknown key, which
+    # is the honest outcome for a switch that would no longer do what it
+    # claims.
     for key in ("watch_confidence", "alert_confidence"):
         _num(
             cfg, errors, f"incidents_v2.{key}",

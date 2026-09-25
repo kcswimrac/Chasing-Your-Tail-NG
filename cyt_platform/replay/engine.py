@@ -185,18 +185,17 @@ class ReplayEngine:
 
         return RFPluginRunner(store, self.config)
 
-    def _build_lifecycle(self, store: Any) -> Optional[Any]:
-        """The D2 incident lifecycle engine, opt-in via incidents_v2.enabled.
+    def _build_lifecycle(self, store: Any) -> Any:
+        """The D2 incident lifecycle engine (always on since B1).
 
-        Off by default so pre-lifecycle scenario reports stay byte-identical
-        (no phenomenon rows, no transition events, no lifecycle summary key).
-        Rebuilt with the store after simulated restarts — the engine holds a
-        store reference, and restart reopens the store.
+        The engine owns phenomenon state in production and in replay alike
+        — same pipeline order, same transitions, no opt-in flag (switching
+        the lifecycle off would silently blind status; locked decision 1).
+        Rebuilt with the store after simulated restarts — the engine holds
+        a store reference, and restart reopens the store.
         """
         from cyt_platform.incidents import IncidentEngine
 
-        if not (self.config.get("incidents_v2") or {}).get("enabled"):
-            return None
         return IncidentEngine(store, self.config)
 
     # --- the replay loop ---
@@ -234,26 +233,25 @@ class ReplayEngine:
                     self._apply_faults(runner, cycle.cycle_id)
                     scan_db = fixture.snapshot_until(cycle.clock_ts)
                     stats = self._detect(store, runner, kdb, scan_db)
-                    state = self._compose_cycle_state(store, stats)
-                    lifecycle_transitions = 0
-                    if lifecycle is not None:
-                        # The engine owns phenomenon state: one apply per
-                        # cycle, after detection, before stale-close (its
-                        # own staleness decay handles lifecycle rows).
-                        with store.transaction():
-                            lifecycle_transitions = len(
-                                lifecycle.apply(self.clock.now())
-                            )
+                    # The engine owns phenomenon state: one apply per cycle,
+                    # after detection and BEFORE stale-close and status
+                    # composition — the same order as the service loop, so
+                    # replay and live compose state from the same lifecycle
+                    # rows (B1).
+                    with store.transaction():
+                        lifecycle_transitions = len(
+                            lifecycle.apply(self.clock.now())
+                        )
                     self._close_stale(store)
+                    state = self._compose_cycle_state(store, stats)
                     summary = {
                         "cycle_id": cycle.cycle_id,
                         "clock_ts": cycle.clock_ts,
                         "observations_recorded": len(recorded),
                         "detection": stats,
                         "state": state,
+                        "lifecycle_transitions": lifecycle_transitions,
                     }
-                    if lifecycle is not None:
-                        summary["lifecycle_transitions"] = lifecycle_transitions
                     summaries.append(summary)
                     if cycle.cycle_id in points:
                         # Simulated service restart: close/reopen the store
@@ -384,16 +382,21 @@ class ReplayEngine:
         """
         from cyt_platform.status import compose_state
 
+        # B2: same contract as the service's get_status_inputs — count
+        # lifecycle rows only. Detector-owned rows (lifecycle_state IS NULL)
+        # carry static severity and are contributions, never threat owners.
         rows = store.conn.execute(
             """
-            SELECT severity, COUNT(*) AS c FROM incidents
-            WHERE status='open' AND COALESCE(suppressed, 0)=0
-            GROUP BY severity
+            SELECT lifecycle_state, COUNT(*) AS c FROM incidents
+            WHERE status='open'
+              AND lifecycle_state IN ('watch', 'alert')
+              AND COALESCE(suppressed, 0)=0
+            GROUP BY lifecycle_state
             """
         ).fetchall()
-        by_severity = {r["severity"]: r["c"] for r in rows}
-        threat_level = 2 if by_severity.get("alert") else (
-            1 if by_severity.get("watch") else 0
+        by_state = {r["lifecycle_state"]: r["c"] for r in rows}
+        threat_level = 2 if by_state.get("alert") else (
+            1 if by_state.get("watch") else 0
         )
         # Replay v1 composes the detection surface only: the fixture DB and
         # analyzer are healthy by construction, so component_fail/deaf are

@@ -93,14 +93,22 @@ def test_scenario_clock_drives_detection_not_wall_clock(tmp_path):
     ~2023 (epoch 1.7e9), far outside any wall-clock catch-up window, so any
     residual wall-clock read would miss them entirely."""
     report = run_scenario(SCENARIOS / "commute-deauth-burst.json", tmp_path)
-    assert len(report["incidents"]) == 1
-    incident = report["incidents"][0]
-    assert incident["event_type"] == "deauth_attack"
+    # B1: every detection also opens a lifecycle phenomenon row — one
+    # detector row + one phenomenon for the subject.
+    detector = [
+        i for i in report["incidents"] if i["event_type"] == "deauth_attack"
+    ]
+    assert len(detector) == 1
+    incident = detector[0]
     assert incident["severity"] == "watch"
     # Evidence time is the alert timestamp, not a wall clock.
     assert incident["first_seen"] == pytest.approx(1699999994.0)
     assert incident["last_seen"] == pytest.approx(1699999997.0)
     assert incident["session_id"] == "replay-commute-deauth-burst"
+    phenomena = [
+        i for i in report["incidents"] if i["event_type"] == "phenomenon"
+    ]
+    assert len(phenomena) == 1
 
 
 def test_observations_carry_provenance(tmp_path):
@@ -144,16 +152,26 @@ def test_rogue_alert_does_not_refile_after_restart(tmp_path):
     while a genuinely fresh re-observation (ts past the watermark) re-observes
     the SAME incident instead of opening a second one."""
     report = run_scenario(SCENARIOS / "cafe-evil-twin.json", tmp_path)
-    assert len(report["incidents"]) == 1
-    incident = report["incidents"][0]
-    assert incident["event_type"] == "rogue_ap"
+    detector = [
+        i for i in report["incidents"] if i["event_type"] == "rogue_ap"
+    ]
+    assert len(detector) == 1
+    incident = detector[0]
     assert incident["severity"] == "alert"
     assert incident["entity_key"] == "BB:BB:CC:00:99:99"
     assert incident["first_seen"] == pytest.approx(1700000015.0)
     # The post-restart re-observation (cycle 4) updates the same incident:
-    # one incident, two observations, fresh last_seen.
+    # one detector incident, two observations, fresh last_seen — and the
+    # phenomenon continues across the restart instead of duplicating.
     assert incident["observation_count"] == 2
     assert incident["last_seen"] == pytest.approx(1700000055.0)
+    phenomena = [
+        i
+        for i in report["incidents"]
+        if i["event_type"] == "phenomenon"
+        and i["entity_key"] == "BB:BB:CC:00:99:99"
+    ]
+    assert len(phenomena) == 1
 
 
 # --- device-row detector scenarios (BLE, co-travel) ------------------------------
@@ -161,9 +179,11 @@ def test_rogue_alert_does_not_refile_after_restart(tmp_path):
 
 def test_ble_scenario_detects_tracker(tmp_path):
     report = run_scenario(SCENARIOS / "walk-ble-tracker.json", tmp_path)
-    assert len(report["incidents"]) == 1
-    incident = report["incidents"][0]
-    assert incident["event_type"] == "ble_tracker"
+    detector = [
+        i for i in report["incidents"] if i["event_type"] == "ble_tracker"
+    ]
+    assert len(detector) == 1
+    incident = detector[0]
     assert incident["severity"] == "alert"
     assert incident["entity_key"] == "DD:DD:DD:DD:DD:01"
     # observed_at is the cycle clock, not a device timestamp.
@@ -259,25 +279,25 @@ def test_merge_scenario_one_incident_two_contributions(tmp_path):
         store.close()
 
 
-def test_merge_scenario_engine_off_files_separate_incidents(tmp_path):
-    """The contrast case: identical session with incidents_v2 disabled keeps
-    the pre-D2 behavior — cotravel and deauth are separate detector
-    incidents (the merge is the engine's, not an artifact of the scenario)."""
+def test_engine_always_on_phenomena_and_transitions(tmp_path):
+    """The lifecycle engine is not opt-in anymore (B1): a plain scenario run
+    with no incidents_v2 overrides still files phenomenon rows, emits
+    transition events, and carries the lifecycle summary key on every
+    cycle — replay and the live service run the same engine."""
     doc = json.loads((SCENARIOS / "cotravel-deauth-merge.json").read_text())
-    doc["config_overrides"].pop("incidents_v2")
-    doc["session_id"] = "replay-cotravel-deauth-merge-engine-off"
-    alt = tmp_path / "engine-off.json"
-    alt.write_text(json.dumps(doc))
+    doc["session_id"] = "replay-cotravel-deauth-merge-always-on"
+    path = tmp_path / "always-on.json"
+    path.write_text(json.dumps(doc))
 
-    report = run_scenario(alt, tmp_path)
+    report = run_scenario(path, tmp_path)
     kinds = {i["event_type"] for i in report["incidents"]}
-    assert "phenomenon" not in kinds
+    assert "phenomenon" in kinds
+    # Detector rows are still filed as contributions alongside phenomena.
     assert {i["event_type"] for i in report["incidents"]} >= {
         "cotravel",
         "deauth_attack",
     }
-    # And no lifecycle summary key rides on engine-off cycles.
-    assert all("lifecycle_transitions" not in c for c in report["cycles"])
+    assert all("lifecycle_transitions" in c for c in report["cycles"])
 
 
 # --- scenario validation ---------------------------------------------------------
@@ -387,7 +407,10 @@ def test_report_state_matches_expect_state_labels(tmp_path):
     for name, expected in (
         ("commute-quiet.json", "clear"),
         ("commute-deauth-burst.json", "watch"),
-        ("cafe-evil-twin.json", "alert"),
+        # Evidence-first (B2): the rogue detector row keeps its static
+        # alert severity, but a single detector cannot escalate the
+        # phenomenon past WATCH — status derives from lifecycle rows.
+        ("cafe-evil-twin.json", "watch"),
     ):
         report = run_scenario(SCENARIOS / name, tmp_path / name)
         assert report["cycles"][-1]["state"] == expected, name

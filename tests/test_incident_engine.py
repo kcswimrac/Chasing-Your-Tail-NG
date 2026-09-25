@@ -46,7 +46,6 @@ def store(tmp_path):
 FUSION_CFG = {
     "fusion": {"weights": {"window_match": 0.5, "cotravel_visit": 0.5}},
     "incidents_v2": {
-        "enabled": True,
         "watch_confidence": 0.30,
         "alert_confidence": 0.60,
         "alert_min_detectors": 2,
@@ -159,7 +158,7 @@ def test_single_weak_observation_stays_new(store: CytStore):
     """Below the watch bar and uncorroborated: recorded, not escalated."""
     weak_cfg = {
         "fusion": {"weights": {"window_match": 0.2}},
-        "incidents_v2": {"enabled": True},
+        "incidents_v2": {},
     }
     _emit(store, _result("mac_reappear", "window_match"))
     _engine(store, weak_cfg).apply(now=T0)

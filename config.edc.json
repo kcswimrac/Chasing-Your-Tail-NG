@@ -94,6 +94,15 @@
   "incidents": {
     "close_after_seconds": 600
   },
+  "incidents_v2": {
+    "watch_confidence": 0.30,
+    "alert_confidence": 0.60,
+    "alert_min_detectors": 2,
+    "close_after_s": 600.0,
+    "decay_grace_s": 120.0,
+    "reopen_resolved_s": 0.0,
+    "reopen_disposition_s": 604800.0
+  },
   "status": {
     "file": "/run/cyt/status.json",
     "stale_seconds": 150,
