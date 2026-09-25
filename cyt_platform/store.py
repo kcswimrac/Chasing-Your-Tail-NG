@@ -13,7 +13,7 @@ import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Generator, List, Optional
+from typing import Any, Dict, Generator, List, Optional, Tuple
 
 from cyt_platform.crypto import (
     CryptoError,
@@ -50,6 +50,11 @@ RETENTION_CLASSES: Dict[str, str] = {
     "entity_fingerprints": "medium",
     "baseline_sightings": "medium",
     "incidents": "closed",
+    # Incident audit children purge as orphans of their parent incident
+    # (see purge_retention) — they live exactly as long as the record
+    # they explain.
+    "incident_timeline": "closed",
+    "incident_contributions": "closed",
     "entities": "entity",
     "push_queue": "sent",
     "schema_meta": "keep",
@@ -233,6 +238,52 @@ CREATE INDEX IF NOT EXISTS idx_hyp_status ON identity_hypotheses(status, updated
 CREATE INDEX IF NOT EXISTS idx_hyp_key_a ON identity_hypotheses(key_a);
 CREATE INDEX IF NOT EXISTS idx_hyp_key_b ON identity_hypotheses(key_b);
 """
+
+# Schema v4, D2 incident lifecycle v2: the phenomenon incident carries its
+# lifecycle state, fused confidence, operator disposition, and a
+# session-independent phenomenon key on the incidents row itself (additive
+# columns), with an append-only incident_timeline recording every state move
+# (the confidence history) and incident_contributions recording which
+# detectors/evidence classes feed the phenomenon. Same pattern as
+# identity_hypotheses above: idempotent DDL run on every open — part of v4,
+# no schema_meta bump. The timeline is the audit trail; the events table
+# still receives one event per transition for the existing audit surface.
+SCHEMA_V4_INCIDENTS = """
+CREATE TABLE IF NOT EXISTS incident_timeline (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  incident_id   INTEGER NOT NULL REFERENCES incidents(id),
+  ts            REAL NOT NULL,
+  from_state    TEXT,
+  to_state      TEXT NOT NULL,
+  reason        TEXT NOT NULL,
+  confidence    REAL,
+  detail_json   TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_timeline_incident ON incident_timeline(incident_id, id);
+CREATE INDEX IF NOT EXISTS idx_timeline_ts ON incident_timeline(ts);
+
+CREATE TABLE IF NOT EXISTS incident_contributions (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  incident_id    INTEGER NOT NULL REFERENCES incidents(id),
+  detector       TEXT NOT NULL,
+  evidence_class TEXT NOT NULL,
+  hits           INTEGER NOT NULL DEFAULT 1,
+  first_ts       REAL NOT NULL,
+  last_ts        REAL NOT NULL,
+  detail_json    TEXT,
+  UNIQUE(incident_id, detector, evidence_class)
+);
+CREATE INDEX IF NOT EXISTS idx_contrib_incident ON incident_contributions(incident_id);
+"""
+
+# Additive incidents columns for the D2 lifecycle (guarded idempotent ALTERs,
+# same pattern as the v2 suppressed/evidence_json columns).
+_LIFECYCLE_COLUMNS = (
+    ("lifecycle_state", "TEXT"),
+    ("confidence", "REAL"),
+    ("disposition", "TEXT"),
+    ("phenomenon_key", "TEXT"),
+)
 
 
 @dataclass
@@ -436,6 +487,25 @@ class CytStore:
         # pick the table up on next open — no schema_meta bump, this is part
         # of v4, not a new schema version.
         c.executescript(SCHEMA_V4_IDENTITY)
+
+        # D2 completes the v4 store definition with the incident lifecycle:
+        # timeline + contributions tables and additive incidents columns
+        # (lifecycle_state, confidence, disposition, phenomenon_key).
+        self._migrate_v4_incidents(c)
+
+    def _migrate_v4_incidents(self, c: sqlite3.Cursor) -> None:
+        """D2 incident lifecycle: idempotent additive DDL, no version bump."""
+        c.executescript(SCHEMA_V4_INCIDENTS)
+        existing = {
+            r["name"] for r in c.execute("PRAGMA table_info(incidents)").fetchall()
+        }
+        for name, decl in _LIFECYCLE_COLUMNS:
+            if name not in existing:
+                c.execute(f"ALTER TABLE incidents ADD COLUMN {name} {decl}")
+        c.execute(
+            "CREATE INDEX IF NOT EXISTS idx_incidents_phenomenon "
+            "ON incidents(phenomenon_key)"
+        )
 
     def _migrate_v2(self, c: sqlite3.Cursor) -> None:
         c.execute(
@@ -800,7 +870,7 @@ class CytStore:
         rows = self.conn.execute(
             """
             SELECT id, entity_id, severity, summary, session_id FROM incidents
-            WHERE status='open' AND last_seen < ?
+            WHERE status='open' AND last_seen < ? AND lifecycle_state IS NULL
             """,
             (cutoff,),
         ).fetchall()
@@ -827,6 +897,327 @@ class CytStore:
             )
             closed += 1
         return closed
+
+    # --- D2 incident lifecycle persistence ---------------------------------
+
+    def get_incident_by_key(self, incident_key: str) -> Optional[sqlite3.Row]:
+        """Fetch one incident row by its (unique) incident key."""
+        return self.conn.execute(
+            "SELECT * FROM incidents WHERE incident_key=?", (incident_key,)
+        ).fetchone()
+
+    def ensure_phenomenon_incident(
+        self,
+        *,
+        incident_key: str,
+        entity_type: str,
+        subject: str,
+        ts: float,
+        session_id: str,
+    ) -> Tuple[int, bool]:
+        """Find-or-create the phenomenon incident for ``incident_key``.
+
+        Session-independent: the key is subject-based (one phenomenon per
+        subject, regardless of which detector fired), never session-scoped,
+        so a restart rehydrates the SAME incident — the D2 replacement for
+        session-scoped keys. On creation the row
+        starts at lifecycle NEW with an opening timeline row (NULL -> new)
+        and an ``incident_opened`` audit event.
+        """
+        row = self.get_incident_by_key(incident_key)
+        if row is not None:
+            return int(row["id"]), False
+        entity_id = self.upsert_entity(entity_type, subject, ts)
+        cur = self.conn.execute(
+            """
+            INSERT INTO incidents(
+              incident_key, entity_id, event_type, window_label, severity,
+              session_id, first_seen, last_seen, observation_count, status,
+              closed_at, summary, detail_json, kismet_db,
+              lifecycle_state, confidence, disposition, phenomenon_key
+            ) VALUES (?, ?, 'phenomenon', 'fused', 'info', ?, ?, ?, 0,
+                      'open', NULL, ?, NULL, NULL, 'new', NULL, NULL, ?)
+            """,
+            (
+                incident_key,
+                entity_id,
+                session_id,
+                ts,
+                ts,
+                f"phenomenon {entity_type} {subject}",
+                incident_key,
+            ),
+        )
+        iid = int(cur.lastrowid)
+        self._append_timeline(iid, ts, None, "new", "first_observation", None)
+        self.conn.execute(
+            """
+            INSERT INTO events(ts, event_type, incident_id, entity_id, severity, summary, detail_json, session_id)
+            VALUES (?, 'incident_opened', ?, ?, 'info', ?, ?, ?)
+            """,
+            (
+                ts,
+                iid,
+                entity_id,
+                f"phenomenon opened: {subject}",
+                json.dumps({"phenomenon_key": incident_key}, sort_keys=True),
+                session_id,
+            ),
+        )
+        return iid, True
+
+    def _append_timeline(
+        self,
+        incident_id: int,
+        ts: float,
+        from_state: Optional[str],
+        to_state: str,
+        reason: str,
+        confidence: Optional[float],
+    ) -> None:
+        """Append one incident_timeline row (transition or note record)."""
+        self.conn.execute(
+            """
+            INSERT INTO incident_timeline(
+              incident_id, ts, from_state, to_state, reason, confidence
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (incident_id, ts, from_state, to_state, reason, confidence),
+        )
+
+    def apply_transition(self, plan: Any) -> None:
+        """Persist one validated lifecycle move: row update + timeline + event.
+
+        The persistence half of ``incidents.transition`` — the ONLY writer
+        of incidents.lifecycle_state. Updates the row (lifecycle state,
+        confidence, the legacy status/severity columns, closed_at,
+        disposition), appends the timeline row, and emits the
+        ``incident_transition`` audit event.
+        """
+        from cyt_platform.incidents import (
+            ACTIVE_STATES,
+            SEVERITY_FOR_STATE,
+            IncidentStatus,
+        )
+
+        new_severity = SEVERITY_FOR_STATE[plan.to_state]
+        active = plan.to_state in ACTIVE_STATES
+        disposition = (
+            plan.to_state.value
+            if plan.to_state
+            in (
+                IncidentStatus.RESOLVED,
+                IncidentStatus.FALSE_POSITIVE,
+                IncidentStatus.KNOWN_DEVICE,
+            )
+            else None
+        )
+        self.conn.execute(
+            """
+            UPDATE incidents SET lifecycle_state=?, confidence=?,
+              severity=COALESCE(?, severity), status=?,
+              closed_at=?, disposition=?
+            WHERE id=?
+            """,
+            (
+                plan.to_state.value,
+                plan.confidence,
+                new_severity,
+                "open" if active else "closed",
+                None if active else plan.ts,
+                disposition,
+                plan.incident_id,
+            ),
+        )
+        row = self.conn.execute(
+            "SELECT incident_key, entity_id, severity, session_id FROM incidents WHERE id=?",
+            (plan.incident_id,),
+        ).fetchone()
+        detail = {
+            "incident_key": row["incident_key"],
+            "from": plan.from_state.value,
+            "to": plan.to_state.value,
+            "confidence": plan.confidence,
+            "reason": plan.reason,
+        }
+        self._append_timeline(
+            plan.incident_id,
+            plan.ts,
+            plan.from_state.value,
+            plan.to_state.value,
+            plan.reason,
+            plan.confidence,
+        )
+        self.conn.execute(
+            """
+            INSERT INTO events(ts, event_type, incident_id, entity_id, severity, summary, detail_json, session_id)
+            VALUES (?, 'incident_transition', ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                plan.ts,
+                plan.incident_id,
+                int(row["entity_id"]),
+                str(new_severity or row["severity"]),
+                f"lifecycle {plan.from_state.value} -> {plan.to_state.value}: {plan.reason}",
+                json.dumps(detail, sort_keys=True),
+                row["session_id"],
+            ),
+        )
+
+    def update_incident_confidence(self, incident_id: int, confidence: float) -> None:
+        """Refresh the fused confidence between transitions.
+
+        The transition history (with the confidence at each move) lives in
+        incident_timeline; this keeps the row's current number fresh for
+        surfaces that read the column directly.
+        """
+        self.conn.execute(
+            "UPDATE incidents SET confidence=? WHERE id=?", (confidence, incident_id)
+        )
+
+    def touch_incident(self, incident_id: int, ts: float) -> None:
+        """Stamp the freshest EVIDENCE time on a phenomenon incident.
+
+        Kept separate from apply_transition on purpose: state moves are
+        engine events, evidence is what staleness/decay measure. A
+        transition that bumped last_seen would let the engine's own moves
+        defer staleness indefinitely.
+        """
+        self.conn.execute(
+            "UPDATE incidents SET last_seen=MAX(last_seen, ?) WHERE id=?",
+            (float(ts), incident_id),
+        )
+
+    def record_contribution(
+        self,
+        incident_id: int,
+        detector: str,
+        evidence_class: str,
+        ts: float,
+        detail: Optional[dict] = None,
+    ) -> None:
+        """Upsert one detector's contribution to a phenomenon incident.
+
+        A contribution is a cumulative fact about the phenomenon, not a
+        per-cycle event: the same (incident, detector, evidence class)
+        recurring across cycles extends the window (hits + 1, last_ts
+        moves forward) instead of duplicating. The first detail sticks —
+        later details ride on the detector rows and the timeline.
+        """
+        self.conn.execute(
+            """
+            INSERT INTO incident_contributions(
+              incident_id, detector, evidence_class, hits, first_ts, last_ts, detail_json
+            ) VALUES (?, ?, ?, 1, ?, ?, ?)
+            ON CONFLICT(incident_id, detector, evidence_class)
+            DO UPDATE SET hits=hits+1, last_ts=MAX(last_ts, excluded.last_ts)
+            """,
+            (
+                incident_id,
+                detector,
+                evidence_class,
+                float(ts),
+                float(ts),
+                json.dumps(detail, sort_keys=True) if detail is not None else None,
+            ),
+        )
+
+    def list_incident_contributions(self, incident_id: int) -> List[dict]:
+        """The incident's detector contributions, deterministic order."""
+        rows = self.conn.execute(
+            """
+            SELECT detector, evidence_class, hits, first_ts, last_ts, detail_json
+            FROM incident_contributions WHERE incident_id = ?
+            ORDER BY detector, evidence_class
+            """,
+            (incident_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def count_incident_contributions(self, incident_id: int) -> int:
+        """Distinct (detector, evidence-class) contributions recorded so far."""
+        row = self.conn.execute(
+            "SELECT COUNT(*) AS c FROM incident_contributions WHERE incident_id=?",
+            (incident_id,),
+        ).fetchone()
+        return int(row["c"])
+
+    def append_incident_note(
+        self,
+        incident_id: int,
+        ts: float,
+        reason: str,
+        confidence: Optional[float] = None,
+    ) -> None:
+        """Record a non-transition observation on the timeline (from==to).
+
+        Used for reopen-suppressed evidence on disposed incidents: the
+        operator's disposition sticks, but the observation is not silently
+        dropped — it goes on the record. Notes do not emit events; the
+        events table is for state changes.
+        """
+        row = self.conn.execute(
+            "SELECT lifecycle_state FROM incidents WHERE id=?", (incident_id,)
+        ).fetchone()
+        if row is None or row["lifecycle_state"] is None:
+            return
+        self._append_timeline(
+            incident_id,
+            ts,
+            row["lifecycle_state"],
+            row["lifecycle_state"],
+            f"note: {reason}",
+            confidence,
+        )
+
+    def touched_incidents_since(self, since_ts: float) -> List[dict]:
+        """Detector-owned incident rows last observed after ``since_ts``.
+
+        The engine's per-cycle input: legacy detection rows (lifecycle_state
+        IS NULL, never phenomenon rows), oldest first — deterministic order
+        for deterministic fusion.
+        """
+        rows = self.conn.execute(
+            """
+            SELECT i.id, i.incident_key, i.event_type, i.window_label,
+                   i.severity, i.session_id, i.first_seen, i.last_seen,
+                   i.summary, i.evidence_json,
+                   e.entity_type, e.key AS entity_key
+            FROM incidents i JOIN entities e ON e.id = i.entity_id
+            WHERE i.last_seen > ?
+              AND i.lifecycle_state IS NULL
+              AND i.event_type != 'phenomenon'
+            ORDER BY i.last_seen, i.incident_key
+            """,
+            (float(since_ts),),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def active_phenomenon_incidents(self) -> List[dict]:
+        """Engine-owned incident rows in an active lifecycle state."""
+        rows = self.conn.execute(
+            """
+            SELECT id, incident_key, phenomenon_key, lifecycle_state,
+                   confidence, disposition, severity, last_seen, first_seen,
+                   session_id
+            FROM incidents
+            WHERE phenomenon_key IS NOT NULL
+              AND lifecycle_state IN ('new', 'observing', 'watch', 'alert')
+            ORDER BY incident_key
+            """,
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def list_incident_timeline(self, incident_id: int) -> List[dict]:
+        """The append-only transition timeline, oldest first."""
+        rows = self.conn.execute(
+            """
+            SELECT id, ts, from_state, to_state, reason, confidence
+            FROM incident_timeline WHERE incident_id = ? ORDER BY id
+            """,
+            (incident_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
 
     def write_heartbeat(
         self,
@@ -1120,6 +1511,17 @@ class CytStore:
         counts["incidents"] = c.execute(
             "DELETE FROM incidents WHERE status='closed' AND COALESCE(closed_at, last_seen) < ?",
             (medium_cut,),
+        ).rowcount
+        # Incident audit children (D2): orphan purge — rows whose parent
+        # incident is gone have no meaning. Keeps each timeline/contribution
+        # exactly as long as the incident it explains.
+        counts["incident_timeline"] = c.execute(
+            "DELETE FROM incident_timeline "
+            "WHERE incident_id NOT IN (SELECT id FROM incidents)"
+        ).rowcount
+        counts["incident_contributions"] = c.execute(
+            "DELETE FROM incident_contributions "
+            "WHERE incident_id NOT IN (SELECT id FROM incidents)"
         ).rowcount
         # Entities referenced by surviving rows (open incidents, live
         # fingerprint links) are pinned — FKs must not break and the

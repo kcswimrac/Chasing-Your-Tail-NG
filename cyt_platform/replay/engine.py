@@ -185,6 +185,20 @@ class ReplayEngine:
 
         return RFPluginRunner(store, self.config)
 
+    def _build_lifecycle(self, store: Any) -> Optional[Any]:
+        """The D2 incident lifecycle engine, opt-in via incidents_v2.enabled.
+
+        Off by default so pre-lifecycle scenario reports stay byte-identical
+        (no phenomenon rows, no transition events, no lifecycle summary key).
+        Rebuilt with the store after simulated restarts — the engine holds a
+        store reference, and restart reopens the store.
+        """
+        from cyt_platform.incidents import IncidentEngine
+
+        if not (self.config.get("incidents_v2") or {}).get("enabled"):
+            return None
+        return IncidentEngine(store, self.config)
+
     # --- the replay loop ---
     def run(self, *, restarts: Optional[List[int]] = None) -> Dict[str, Any]:
         """Replay the scenario; return the deterministic report dict.
@@ -207,6 +221,7 @@ class ReplayEngine:
             summaries: List[Dict[str, Any]] = []
             try:
                 runner = self._build_runner(store)
+                lifecycle = self._build_lifecycle(store)
                 # Built once after the fixture is populated; read-only and
                 # stateless, so it survives simulated restarts unchanged.
                 kdb = _ReplayKismetView(str(fixture.path))
@@ -219,16 +234,26 @@ class ReplayEngine:
                     self._apply_faults(runner, cycle.cycle_id)
                     stats = self._detect(store, runner, kdb, fixture)
                     state = self._compose_cycle_state(store, stats)
+                    lifecycle_transitions = 0
+                    if lifecycle is not None:
+                        # The engine owns phenomenon state: one apply per
+                        # cycle, after detection, before stale-close (its
+                        # own staleness decay handles lifecycle rows).
+                        with store.transaction():
+                            lifecycle_transitions = len(
+                                lifecycle.apply(self.clock.now())
+                            )
                     self._close_stale(store)
-                    summaries.append(
-                        {
-                            "cycle_id": cycle.cycle_id,
-                            "clock_ts": cycle.clock_ts,
-                            "observations_recorded": len(recorded),
-                            "detection": stats,
-                            "state": state,
-                        }
-                    )
+                    summary = {
+                        "cycle_id": cycle.cycle_id,
+                        "clock_ts": cycle.clock_ts,
+                        "observations_recorded": len(recorded),
+                        "detection": stats,
+                        "state": state,
+                    }
+                    if lifecycle is not None:
+                        summary["lifecycle_transitions"] = lifecycle_transitions
+                    summaries.append(summary)
                     if cycle.cycle_id in points:
                         # Simulated service restart: close/reopen the store
                         # (watermarks live in runtime_state) and rebuild the
@@ -236,6 +261,7 @@ class ReplayEngine:
                         store.close()
                         store = self._open_store()
                         runner = self._build_runner(store)
+                        lifecycle = self._build_lifecycle(store)
                 report = build_report(self.scenario, store, summaries, points)
             finally:
                 store.close()
