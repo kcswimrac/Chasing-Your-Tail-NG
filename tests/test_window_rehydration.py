@@ -14,7 +14,7 @@ from cyt_platform.windows import (
     merge_into_monitor,
     save_window_sets,
 )
-from secure_main_logic import SecureCYTMonitor
+from cyt_platform.secure_main_logic import SecureCYTMonitor
 
 T0 = 1_700_000_000.0
 FOLLOWER = "AA:BB:CC:DD:EE:01"

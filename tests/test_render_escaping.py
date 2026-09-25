@@ -16,7 +16,7 @@ from unittest.mock import patch
 import pytest
 
 from gps_tracker import GPSTracker, KMLExporter
-from input_validation import InputValidator
+from cyt_platform.input_validation import InputValidator
 from surveillance_detector import (
     DeviceAppearance,
     SurveillanceDetector,
@@ -187,7 +187,9 @@ class TestRenderSourcesGuard:
 
     def test_no_unescaped_rf_interpolation_on_render_paths(self):
         repo_root = Path(__file__).resolve().parents[1]
-        for name in ("gps_tracker.py", "surveillance_detector.py"):
+        # gps_tracker.py / surveillance_detector.py are quarantined under
+        # legacy/ — the escaping invariant follows the files there.
+        for name in ("legacy/gps_tracker.py", "legacy/surveillance_detector.py"):
             source = (repo_root / name).read_text()
             for pattern in self.RAW_INTERPOLATIONS:
                 assert pattern not in source, f"{name}: unescaped RF interpolation {pattern!r}"

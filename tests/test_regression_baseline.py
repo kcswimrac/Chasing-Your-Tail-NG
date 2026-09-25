@@ -6,12 +6,14 @@ import inspect
 from pathlib import Path
 
 import chasing_your_tail
-import secure_database
-from secure_main_logic import MatchEvent, SecureCYTMonitor
+from cyt_platform import secure_database
+from cyt_platform.secure_main_logic import MatchEvent, SecureCYTMonitor
 
 
 def test_match_event_lives_in_secure_main_logic():
-    assert MatchEvent.__module__ == "secure_main_logic"
+    # Quarantine moved the runtime-role modules into the package; MatchEvent
+    # still lives beside SecureCYTMonitor, now under cyt_platform.
+    assert MatchEvent.__module__ == "cyt_platform.secure_main_logic"
 
 
 def test_secure_kismet_supports_read_only():

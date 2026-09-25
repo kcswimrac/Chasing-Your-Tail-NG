@@ -34,7 +34,7 @@ from cyt_platform.fused_evidence import (
     fused_evidence,
     render_confidence_block,
 )
-from input_validation import InputValidator
+from cyt_platform.input_validation import InputValidator
 
 SUBJECT = "AA:BB:CC:DD:EE:01"
 

@@ -28,43 +28,44 @@ from cyt_platform.__main__ import build_parser
 REPO = Path(__file__).resolve().parent.parent
 README = (REPO / "README.md").read_text(encoding="utf-8")
 
-# Repo files the README references as paths. Runtime outputs (status.json,
-# cyt.db, debrief logs, ignore_lists/*.json) are created on first run and
-# deliberately not listed here.
+# Repo files the README references as paths (post-quarantine locations:
+# runtime-role modules live in cyt_platform/, archived tools under legacy/).
+# Runtime outputs (status.json, cyt.db, debrief logs, ignore_lists/*.json)
+# are created on first run and deliberately not listed here.
 README_PATHS = [
     "requirements.txt",
-    "migrate_credentials.py",
-    "chasing_your_tail.py",
-    "cyt_gui.py",
+    "legacy/migrate_credentials.py",
+    "legacy/chasing_your_tail.py",
+    "legacy/cyt_gui.py",
     "config.json",
     "config.edc.json",
-    "create_ignore_list.py",
+    "legacy/create_ignore_list.py",
     "deploy/FIELD_DEPLOY.md",
     "docs/EDC_PLATFORM_DESIGN.md",
     "eval/gates.json",
-    "gps_tracker.py",
-    "input_validation.py",
-    "probe_analyzer.py",
+    "legacy/gps_tracker.py",
+    "cyt_platform/input_validation.py",
+    "legacy/probe_analyzer.py",
     "scenarios/replay/commute-quiet.json",
-    "secure_credentials.py",
-    "secure_database.py",
-    "secure_ignore_loader.py",
-    "secure_main_logic.py",
-    "start_kismet_clean.sh",
-    "surveillance_analyzer.py",
-    "surveillance_detector.py",
+    "cyt_platform/secure_credentials.py",
+    "cyt_platform/secure_database.py",
+    "cyt_platform/secure_ignore_loader.py",
+    "cyt_platform/secure_main_logic.py",
+    "legacy/start_kismet_clean.sh",
+    "legacy/surveillance_analyzer.py",
+    "legacy/surveillance_detector.py",
 ]
 
 # Legacy scripts with real argparse: README flags are verified against
 # --help output (safe: argparse exits before any analysis runs).
 HELP_VERIFIED_SCRIPTS = {
-    "surveillance_analyzer.py",
+    "legacy/surveillance_analyzer.py",
 }
 # probe_analyzer.py builds its parser only AFTER config/log discovery
 # (with no logs it exits before argparse), so --help cannot list flags.
 # Its README claims are verified against the declared add_argument set.
 SOURCE_VERIFIED_SCRIPTS = {
-    "probe_analyzer.py",
+    "legacy/probe_analyzer.py",
 }
 
 
@@ -158,9 +159,9 @@ def test_readme_flags_declared_in_script_source(script: str):
 
 
 def test_readme_legacy_loop_sentinel_exists():
-    # chasing_your_tail.py dispatches --legacy-loop via sys.argv membership
-    # (no argparse), so help-text verification does not apply.
-    source = (REPO / "chasing_your_tail.py").read_text(encoding="utf-8")
+    # Quarantined chasing_your_tail.py dispatches --legacy-loop via sys.argv
+    # membership (no argparse), so help-text verification does not apply.
+    source = (REPO / "legacy" / "chasing_your_tail.py").read_text(encoding="utf-8")
     assert '"--legacy-loop" in sys.argv' in source
 
 
@@ -176,13 +177,15 @@ def test_readme_referenced_paths_exist(path: str):
     "stale",
     [
         "--min-persistence",
-        "legacy/create_ignore_list.py",
         "old_scripts/",
         "docs_archive/",
         "Python 3.6+",
     ],
 )
 def test_readme_no_longer_carries_known_stale_claims(stale: str):
+    # "legacy/create_ignore_list.py" was removed from this list when the
+    # quarantine PR moved the tool to exactly that path: the claim stopped
+    # being stale (it used to reference a directory that did not exist).
     assert stale not in README
 
 

@@ -10,8 +10,7 @@ from pathlib import Path
 
 import pytest
 
-import deauth_detector
-import rogue_ap_detector
+from cyt_platform import deauth_detector, rogue_ap_detector
 from cyt_platform.kismet_ro import connect_readonly
 from cyt_platform.rf_plugins import (
     DEAUTH_WATERMARK_KEY,
@@ -346,7 +345,7 @@ def test_runner_records_import_failure_and_clears_on_recovery(tmp_path, monkeypa
     store = CytStore.open({"path": str(tmp_path / "r3.db")})
     config = disabled_rf_config()
     config["rf"]["deauth_enabled"] = True
-    monkeypatch.setitem(sys.modules, "deauth_detector", None)
+    monkeypatch.setitem(sys.modules, "cyt_platform.deauth_detector", None)
     runner = RFPluginRunner(store, config)
     assert "detector:deauth" in runner.failures()
     stats = runner.run_cycle(kdb=None, db_path="unused")
