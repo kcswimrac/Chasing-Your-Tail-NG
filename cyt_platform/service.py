@@ -134,6 +134,13 @@ def run(
         log.info("Current place: %s", place_id)
         store.set_runtime("current_place", place_id)
 
+    resolver = KismetDbResolver((config.get("paths") or {}).get("kismet_logs", "*.kismet"))
+    status = StatusEngine(store, config)
+    seal_every = int(store_cfg.get("seal_every_cycles") or 10)
+    # D6: one failure registry per session — every detector and sensing
+    # component reports into it, and status composition renders it. Built
+    # before the monitor so the window matcher can report into it too (B5).
+    health_registry = ComponentFailureRegistry()
     monitor, deduper = build_monitor(
         config,
         store,
@@ -141,13 +148,8 @@ def run(
         log_sink=log_sink,
         baseline=baseline,
         place_id=place_id,
+        registry=health_registry,
     )
-    resolver = KismetDbResolver((config.get("paths") or {}).get("kismet_logs", "*.kismet"))
-    status = StatusEngine(store, config)
-    seal_every = int(store_cfg.get("seal_every_cycles") or 10)
-    # D6: one failure registry per session — every detector and sensing
-    # component reports into it, and status composition renders it.
-    health_registry = ComponentFailureRegistry()
     rf = RFPluginRunner(store, config, registry=health_registry)
     push = PushQueue(store, config)
     prev_state = "fail"

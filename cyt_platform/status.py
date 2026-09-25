@@ -69,6 +69,43 @@ class ComponentHealth:
     extra: Optional[dict] = None
 
 
+def effective_state(
+    snapshot: dict, *, now: float, stale_seconds: float
+) -> tuple:
+    """The state a status.json consumer should display (S11).
+
+    A snapshot is a heartbeat, not a promise: one whose ``updated_at`` —
+    or ``last_ok`` — is older than ``stale_seconds`` describes a publisher
+    that is dead, parked (ENOSPC), or failing, and is displayed as
+    ("fail", "status_stale: ...") instead of its last written state. A
+    snapshot already reading ``fail`` keeps its own reason (staleness can
+    only degrade a display, never re-label a failure), and a snapshot
+    carrying neither timestamp cannot be aged and is returned as-is.
+
+    Pure: consumers (LED, CLI) supply the clock; detection logic never
+    calls this (locked decision 4).
+    """
+    state = snapshot.get("state")
+    reason = snapshot.get("reason") or ""
+    if state == "fail":
+        return state, reason
+    for ts_key in ("updated_at", "last_ok"):
+        raw = snapshot.get(ts_key)
+        if raw is None:
+            continue
+        try:
+            age = now - float(raw)
+        except (TypeError, ValueError):
+            continue
+        if age > stale_seconds:
+            return (
+                "fail",
+                "status_stale: %s age %ds exceeds stale_seconds %ds"
+                % (ts_key, int(age), int(stale_seconds)),
+            )
+    return state, reason
+
+
 class StatusEngine:
     def __init__(self, store: CytStore, config: dict):
         self.store = store

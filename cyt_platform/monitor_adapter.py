@@ -6,6 +6,7 @@ from typing import Optional, TextIO, Union
 
 from cyt_platform.baseline import BaselineEngine, resolve_place
 from cyt_platform.config import ignore_list_paths
+from cyt_platform.health import ComponentFailureRegistry
 from cyt_platform.incidents import IncidentDeduper
 from cyt_platform.secure_ignore_loader import SecureIgnoreLoader
 from cyt_platform.secure_main_logic import SecureCYTMonitor
@@ -20,6 +21,7 @@ def build_monitor(
     log_sink: Optional[Union[LogFileSink, NullSink, TextIO]] = None,
     baseline: Optional[BaselineEngine] = None,
     place_id: Optional[str] = None,
+    registry: Optional[ComponentFailureRegistry] = None,
 ) -> tuple[SecureCYTMonitor, IncidentDeduper]:
     mac_path, ssid_path = ignore_list_paths(config)
     loader = SecureIgnoreLoader()
@@ -52,5 +54,8 @@ def build_monitor(
         ssids,
         sink,
         on_match=deduper.handle_match,
+        # B5: the window matcher reports into the same per-session health
+        # registry the RF runner and status publish share.
+        registry=registry,
     )
     return monitor, deduper
