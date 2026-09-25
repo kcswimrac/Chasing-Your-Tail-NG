@@ -34,3 +34,56 @@ jobs:
 
       - name: Pytest
         run: pytest -q
+
+  eval-corpus:
+    name: eval corpus (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "${{ matrix.python-version }}"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install project with dev extras
+        run: python -m pip install -e ".[dev]"
+
+      # The labeled corpus + calibrated gates are the regression gate: a red
+      # eval is a broken product promise (false alerts, silent misses,
+      # nondeterminism, restart drift), not a flaky check to re-run.
+      - name: Run labeled scenario corpus against gates
+        run: |
+          python -m cyt_platform eval \
+            --scenarios scenarios/replay \
+            --gates eval/gates.json \
+            --json-out eval-summary-py${{ matrix.python-version }}.json
+
+      - name: Upload eval summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-summary-py${{ matrix.python-version }}
+          path: eval-summary-py${{ matrix.python-version }}.json
+
+  eval-determinism:
+    # Byte-identical eval output across the Python matrix is itself a gate:
+    # same observations + gates must produce the same verdict on 3.9 and 3.13.
+    name: eval determinism across versions
+    needs: [eval-corpus]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download eval summaries
+        uses: actions/download-artifact@v4
+        with:
+          path: eval-summaries
+          pattern: eval-summary-py*
+      - name: Diff summaries across matrix legs
+        run: |
+          diff eval-summaries/eval-summary-py3.9/eval-summary-py3.9.json \
+               eval-summaries/eval-summary-py3.13/eval-summary-py3.13.json \
+            && echo "eval output byte-identical across 3.9 and 3.13"
