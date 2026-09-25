@@ -1,0 +1,88 @@
+{
+  "scenario_version": 1,
+  "scenario_id": "deauth-single-frame",
+  "description": "A single stray deauthentication frame in an otherwise quiet session. Below min_events_for_attack=2, one frame must never file an attack incident.",
+  "session_id": "replay-deauth-single-frame",
+  "labels": {
+    "kind": "normal",
+    "expect": {
+      "detect": false,
+      "state": "clear"
+    }
+  },
+  "config_overrides": {
+    "deauth_detection": {
+      "min_events_for_attack": 2
+    }
+  },
+  "cycles": [
+    {
+      "cycle_id": 1,
+      "clock_ts": 1700000000.0,
+      "rows": [
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "AA:BB:CC:DD:EE:02",
+            "type": "Wi-Fi Client",
+            "last_time": 1699999995.0,
+            "device": {
+              "kismet.device.base.signal": {
+                "kismet.common.signal.last_signal": -60
+              },
+              "kismet.device.base.channel": "6"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "cycle_id": 2,
+      "clock_ts": 1700000030.0,
+      "rows": [
+        {
+          "source": "kismet.alerts",
+          "row": {
+            "ts_sec": 1700000025.0,
+            "header": "DEAUTH",
+            "json": {
+              "kismet.alert.header": "DEAUTH",
+              "kismet.alert.text": "Detected deauthentication attack",
+              "kismet.alert.source_mac": "AA:BB:CC:0D:00:09",
+              "kismet.alert.dest_mac": "AA:BB:CC:DD:EE:02",
+              "kismet.alert.channel": 6
+            },
+            "src_mac": "AA:BB:CC:0D:00:09",
+            "dst_mac": "AA:BB:CC:DD:EE:02",
+            "bssid": ""
+          }
+        }
+      ]
+    },
+    {
+      "cycle_id": 3,
+      "clock_ts": 1700000060.0,
+      "rows": [
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "AA:BB:CC:DD:EE:02",
+            "type": "Wi-Fi Client",
+            "last_time": 1700000055.0,
+            "device": {
+              "kismet.device.base.signal": {
+                "kismet.common.signal.last_signal": -60
+              },
+              "kismet.device.base.channel": "6"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "cycle_id": 4,
+      "clock_ts": 1700000090.0,
+      "rows": []
+    }
+  ]
+}

@@ -1,0 +1,80 @@
+{
+  "scenario_version": 1,
+  "scenario_id": "clock-jump-quiet",
+  "description": "The scenario clock jumps forward one hour mid-session (NTP correction). Windowed pulls and staleness must stay sane across the jump and the quiet air must stay clear.",
+  "session_id": "replay-clock-jump-quiet",
+  "labels": {
+    "kind": "edge",
+    "expect": {
+      "detect": false,
+      "state": "clear"
+    }
+  },
+  "cycles": [
+    {
+      "cycle_id": 1,
+      "clock_ts": 1700000000.0,
+      "rows": [
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "AA:BB:CC:DD:EE:01",
+            "type": "Wi-Fi Client",
+            "last_time": 1699999995.0,
+            "device": {
+              "kismet.device.base.signal": {
+                "kismet.common.signal.last_signal": -60
+              },
+              "kismet.device.base.channel": "6"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "cycle_id": 2,
+      "clock_ts": 1700000030.0,
+      "rows": [
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "AA:BB:CC:DD:EE:01",
+            "type": "Wi-Fi Client",
+            "last_time": 1700000025.0,
+            "device": {
+              "kismet.device.base.signal": {
+                "kismet.common.signal.last_signal": -60
+              },
+              "kismet.device.base.channel": "6"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "cycle_id": 3,
+      "clock_ts": 1700003630.0,
+      "rows": [
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "AA:BB:CC:DD:EE:01",
+            "type": "Wi-Fi Client",
+            "last_time": 1700003625.0,
+            "device": {
+              "kismet.device.base.signal": {
+                "kismet.common.signal.last_signal": -60
+              },
+              "kismet.device.base.channel": "6"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "cycle_id": 4,
+      "clock_ts": 1700003660.0,
+      "rows": []
+    }
+  ]
+}

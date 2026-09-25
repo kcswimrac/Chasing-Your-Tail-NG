@@ -14,7 +14,7 @@ from cyt_platform.replay.report import report_bytes
 from cyt_platform.replay.scenario import ScenarioError, load_scenario
 
 REPO = Path(__file__).resolve().parent.parent
-SCENARIOS = REPO / "tests" / "fixtures" / "replay"
+SCENARIOS = REPO / "scenarios" / "replay"
 
 
 def run_scenario(path: Path, tmp_path: Path, **kwargs):

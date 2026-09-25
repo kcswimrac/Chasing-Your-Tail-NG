@@ -1,28 +1,30 @@
 {
   "scenario_version": 1,
-  "scenario_id": "cafe-evil-twin",
-  "description": "A spoofing access point advertising the operator's trusted network with weaker encryption, then persisting across a service restart",
-  "session_id": "replay-cafe-evil-twin",
+  "scenario_id": "rogue-recurrence-autolearn",
+  "description": "A monitored SSID is auto-learned from its first BSSID; a second BSSID then raises a new-BSSID alert. After the mid-session restart the recurring BSSID must not re-alert (post-restart auto-learn) nor duplicate the incident.",
+  "session_id": "replay-rogue-recurrence-autolearn",
   "labels": {
     "kind": "suspicious",
     "expect": {
       "detect": true,
-      "state": "alert"
+      "state": "alert",
+      "max_latency_cycles": 2,
+      "entity_keys": [
+        "BB:BB:CC:00:33:99"
+      ],
+      "max_incidents": 1
     }
   },
   "config_overrides": {
     "rogue_ap_detection": {
-      "trusted_aps": [
-        {
-          "ssid": "CafeNet",
-          "bssid": "BB:BB:CC:00:11:01",
-          "encryption": "WPA2-PSK",
-          "channel": 6
-        }
+      "monitored_ssids": [
+        "GuestNet"
       ]
     }
   },
-  "restarts": [2],
+  "restarts": [
+    2
+  ],
   "cycles": [
     {
       "cycle_id": 1,
@@ -31,14 +33,14 @@
         {
           "source": "kismet.devices",
           "row": {
-            "devmac": "BB:BB:CC:00:11:01",
+            "devmac": "BB:BB:CC:00:33:01",
             "type": "Wi-Fi AP",
-            "last_time": 1699999990.0,
+            "last_time": 1699999995.0,
             "device": {
               "dot11.device": {
                 "dot11.device.advertised_ssid_map": [
                   {
-                    "dot11.advertisedssid.ssid": "CafeNet",
+                    "dot11.advertisedssid.ssid": "GuestNet",
                     "dot11.advertisedssid.crypt_string": "WPA2-PSK"
                   }
                 ]
@@ -46,69 +48,68 @@
               "kismet.device.base.channel": "6"
             }
           }
-        },
-        {
-          "source": "gps",
-          "fix": {
-            "lat": 45.5200,
-            "lon": -122.6800,
-            "ts": 1699999995.0,
-            "accuracy_m": 8.0
-          }
         }
       ]
     },
     {
       "cycle_id": 2,
-      "clock_ts": 1700000020.0,
+      "clock_ts": 1700000030.0,
       "rows": [
         {
           "source": "kismet.devices",
           "row": {
-            "devmac": "BB:BB:CC:00:99:99",
+            "devmac": "BB:BB:CC:00:33:99",
             "type": "Wi-Fi AP",
-            "last_time": 1700000015.0,
+            "last_time": 1700000025.0,
             "device": {
               "dot11.device": {
                 "dot11.device.advertised_ssid_map": [
                   {
-                    "dot11.advertisedssid.ssid": "CafeNet",
-                    "dot11.advertisedssid.crypt_string": "WEP"
+                    "dot11.advertisedssid.ssid": "GuestNet",
+                    "dot11.advertisedssid.crypt_string": "WPA2-PSK"
                   }
                 ]
               },
-              "kismet.device.base.channel": "11"
+              "kismet.device.base.channel": "6"
             }
           }
         }
       ]
     },
-    { "cycle_id": 3, "clock_ts": 1700000040.0, "rows": [] },
+    {
+      "cycle_id": 3,
+      "clock_ts": 1700000060.0,
+      "rows": []
+    },
     {
       "cycle_id": 4,
-      "clock_ts": 1700000060.0,
+      "clock_ts": 1700000090.0,
       "rows": [
         {
           "source": "kismet.devices",
           "row": {
-            "devmac": "BB:BB:CC:00:99:99",
+            "devmac": "BB:BB:CC:00:33:99",
             "type": "Wi-Fi AP",
-            "last_time": 1700000055.0,
+            "last_time": 1700000085.0,
             "device": {
               "dot11.device": {
                 "dot11.device.advertised_ssid_map": [
                   {
-                    "dot11.advertisedssid.ssid": "CafeNet",
-                    "dot11.advertisedssid.crypt_string": "WEP"
+                    "dot11.advertisedssid.ssid": "GuestNet",
+                    "dot11.advertisedssid.crypt_string": "WPA2-PSK"
                   }
                 ]
               },
-              "kismet.device.base.channel": "11"
+              "kismet.device.base.channel": "6"
             }
           }
         }
       ]
     },
-    { "cycle_id": 5, "clock_ts": 1700000080.0, "rows": [] }
+    {
+      "cycle_id": 5,
+      "clock_ts": 1700000120.0,
+      "rows": []
+    }
   ]
 }

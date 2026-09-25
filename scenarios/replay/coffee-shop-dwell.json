@@ -1,0 +1,145 @@
+{
+  "scenario_version": 1,
+  "scenario_id": "coffee-shop-dwell",
+  "description": "Long dwell at one coffee shop: the same devices stay co-located with the operator at a single place the whole session. Repetition at one place is presence, not tracking \u2014 the evidence-first floor: repeated observation alone never alerts.",
+  "session_id": "replay-coffee-shop-dwell",
+  "labels": {
+    "kind": "normal",
+    "expect": {
+      "detect": false,
+      "state": "clear"
+    }
+  },
+  "config_overrides": {
+    "gps_fusion": {
+      "enabled": true,
+      "min_locations_for_cotravel": 2,
+      "min_span_seconds": 1,
+      "incident_score_threshold": 0.2
+    }
+  },
+  "cycles": [
+    {
+      "cycle_id": 1,
+      "clock_ts": 1700000000.0,
+      "rows": [
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "AA:BB:CC:DD:EE:21",
+            "type": "Wi-Fi Client",
+            "last_time": 1699999995.0,
+            "device": {
+              "kismet.device.base.type": "Wi-Fi Client",
+              "kismet.device.base.location": {
+                "kismet.common.location.geopoint": [
+                  -112.0,
+                  33.4
+                ],
+                "kismet.common.location.time_sec": 1699999995.0
+              }
+            }
+          }
+        },
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "AA:BB:CC:DD:EE:22",
+            "type": "Wi-Fi Client",
+            "last_time": 1699999992.0,
+            "device": {
+              "kismet.device.base.type": "Wi-Fi Client",
+              "kismet.device.base.location": {
+                "kismet.common.location.geopoint": [
+                  -112.0,
+                  33.4
+                ],
+                "kismet.common.location.time_sec": 1699999992.0
+              }
+            }
+          }
+        },
+        {
+          "source": "gps",
+          "fix": {
+            "lat": 33.4,
+            "lon": -112.0,
+            "ts": 1699999997.0,
+            "accuracy_m": 8.0
+          }
+        }
+      ]
+    },
+    {
+      "cycle_id": 2,
+      "clock_ts": 1700000030.0,
+      "rows": [
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "AA:BB:CC:DD:EE:21",
+            "type": "Wi-Fi Client",
+            "last_time": 1700000025.0,
+            "device": {
+              "kismet.device.base.type": "Wi-Fi Client",
+              "kismet.device.base.location": {
+                "kismet.common.location.geopoint": [
+                  -112.0,
+                  33.4
+                ],
+                "kismet.common.location.time_sec": 1700000025.0
+              }
+            }
+          }
+        },
+        {
+          "source": "gps",
+          "fix": {
+            "lat": 33.4,
+            "lon": -112.0,
+            "ts": 1700000027.0,
+            "accuracy_m": 8.0
+          }
+        }
+      ]
+    },
+    {
+      "cycle_id": 3,
+      "clock_ts": 1700000060.0,
+      "rows": [
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "AA:BB:CC:DD:EE:21",
+            "type": "Wi-Fi Client",
+            "last_time": 1700000055.0,
+            "device": {
+              "kismet.device.base.type": "Wi-Fi Client",
+              "kismet.device.base.location": {
+                "kismet.common.location.geopoint": [
+                  -112.0,
+                  33.4
+                ],
+                "kismet.common.location.time_sec": 1700000055.0
+              }
+            }
+          }
+        },
+        {
+          "source": "gps",
+          "fix": {
+            "lat": 33.4,
+            "lon": -112.0,
+            "ts": 1700000057.0,
+            "accuracy_m": 8.0
+          }
+        }
+      ]
+    },
+    {
+      "cycle_id": 4,
+      "clock_ts": 1700000090.0,
+      "rows": []
+    }
+  ]
+}

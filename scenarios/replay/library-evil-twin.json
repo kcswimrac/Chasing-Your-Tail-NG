@@ -1,0 +1,112 @@
+{
+  "scenario_version": 1,
+  "scenario_id": "library-evil-twin",
+  "description": "A second BSSID advertising the operator's trusted library network with WEP while the trusted AP runs WPA2-PSK: unknown-BSSID evil twin plus encryption downgrade.",
+  "session_id": "replay-library-evil-twin",
+  "labels": {
+    "kind": "suspicious",
+    "expect": {
+      "detect": true,
+      "state": "alert",
+      "max_latency_cycles": 2,
+      "entity_keys": [
+        "BB:BB:CC:00:22:99"
+      ],
+      "max_incidents": 1
+    }
+  },
+  "config_overrides": {
+    "rogue_ap_detection": {
+      "trusted_aps": [
+        {
+          "ssid": "LibraryNet",
+          "bssid": "BB:BB:CC:00:22:01",
+          "encryption": "WPA2-PSK",
+          "channel": 1
+        }
+      ]
+    }
+  },
+  "cycles": [
+    {
+      "cycle_id": 1,
+      "clock_ts": 1700000000.0,
+      "rows": [
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "BB:BB:CC:00:22:01",
+            "type": "Wi-Fi AP",
+            "last_time": 1699999995.0,
+            "device": {
+              "dot11.device": {
+                "dot11.device.advertised_ssid_map": [
+                  {
+                    "dot11.advertisedssid.ssid": "LibraryNet",
+                    "dot11.advertisedssid.crypt_string": "WPA2-PSK"
+                  }
+                ]
+              },
+              "kismet.device.base.channel": "1"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "cycle_id": 2,
+      "clock_ts": 1700000030.0,
+      "rows": [
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "BB:BB:CC:00:22:99",
+            "type": "Wi-Fi AP",
+            "last_time": 1700000025.0,
+            "device": {
+              "dot11.device": {
+                "dot11.device.advertised_ssid_map": [
+                  {
+                    "dot11.advertisedssid.ssid": "LibraryNet",
+                    "dot11.advertisedssid.crypt_string": "WEP"
+                  }
+                ]
+              },
+              "kismet.device.base.channel": "1"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "cycle_id": 3,
+      "clock_ts": 1700000060.0,
+      "rows": [
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "BB:BB:CC:00:22:99",
+            "type": "Wi-Fi AP",
+            "last_time": 1700000055.0,
+            "device": {
+              "dot11.device": {
+                "dot11.device.advertised_ssid_map": [
+                  {
+                    "dot11.advertisedssid.ssid": "LibraryNet",
+                    "dot11.advertisedssid.crypt_string": "WEP"
+                  }
+                ]
+              },
+              "kismet.device.base.channel": "1"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "cycle_id": 4,
+      "clock_ts": 1700000090.0,
+      "rows": []
+    }
+  ]
+}

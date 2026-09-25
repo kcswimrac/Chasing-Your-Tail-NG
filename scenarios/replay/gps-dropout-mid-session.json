@@ -1,0 +1,63 @@
+{
+  "scenario_version": 1,
+  "scenario_id": "gps-dropout-mid-session",
+  "description": "The GPS feed dies after one fix and never returns: the gps component must degrade the published state \u2014 'cannot detect' must never read as 'no threat'.",
+  "session_id": "replay-gps-dropout-mid-session",
+  "labels": {
+    "kind": "edge",
+    "expect": {
+      "detect": false,
+      "state": "degraded"
+    }
+  },
+  "config_overrides": {
+    "gps_fusion": {
+      "enabled": true,
+      "dropout_seconds": 10,
+      "min_locations_for_cotravel": 2,
+      "min_span_seconds": 1,
+      "incident_score_threshold": 0.2
+    }
+  },
+  "cycles": [
+    {
+      "cycle_id": 1,
+      "clock_ts": 1700000000.0,
+      "rows": [
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "AA:BB:CC:DD:EE:31",
+            "type": "Wi-Fi Client",
+            "last_time": 1699999995.0,
+            "device": {
+              "kismet.device.base.type": "Wi-Fi Client",
+              "kismet.device.base.location": {
+                "kismet.common.location.geopoint": [
+                  -112.0,
+                  33.4
+                ],
+                "kismet.common.location.time_sec": 1699999995.0
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "cycle_id": 2,
+      "clock_ts": 1700000030.0,
+      "rows": []
+    },
+    {
+      "cycle_id": 3,
+      "clock_ts": 1700000060.0,
+      "rows": []
+    },
+    {
+      "cycle_id": 4,
+      "clock_ts": 1700000090.0,
+      "rows": []
+    }
+  ]
+}

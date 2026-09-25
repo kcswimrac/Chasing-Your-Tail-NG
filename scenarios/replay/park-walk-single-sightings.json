@@ -1,0 +1,127 @@
+{
+  "scenario_version": 1,
+  "scenario_id": "park-walk-single-sightings",
+  "description": "Park walk: passers-by each seen at a single place once. One sighting can never form the two distinct co-located visits co-travel requires.",
+  "session_id": "replay-park-walk-single-sightings",
+  "labels": {
+    "kind": "normal",
+    "expect": {
+      "detect": false,
+      "state": "clear"
+    }
+  },
+  "config_overrides": {
+    "gps_fusion": {
+      "enabled": true,
+      "min_locations_for_cotravel": 2,
+      "min_span_seconds": 1,
+      "incident_score_threshold": 0.2
+    }
+  },
+  "cycles": [
+    {
+      "cycle_id": 1,
+      "clock_ts": 1700000000.0,
+      "rows": [
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "AA:BB:CC:DD:EE:11",
+            "type": "Wi-Fi Client",
+            "last_time": 1699999995.0,
+            "device": {
+              "kismet.device.base.type": "Wi-Fi Client",
+              "kismet.device.base.location": {
+                "kismet.common.location.geopoint": [
+                  -112.0,
+                  33.4
+                ],
+                "kismet.common.location.time_sec": 1699999995.0
+              }
+            }
+          }
+        },
+        {
+          "source": "gps",
+          "fix": {
+            "lat": 33.4,
+            "lon": -112.0,
+            "ts": 1699999997.0,
+            "accuracy_m": 8.0
+          }
+        }
+      ]
+    },
+    {
+      "cycle_id": 2,
+      "clock_ts": 1700000030.0,
+      "rows": [
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "AA:BB:CC:DD:EE:12",
+            "type": "Wi-Fi Client",
+            "last_time": 1700000025.0,
+            "device": {
+              "kismet.device.base.type": "Wi-Fi Client",
+              "kismet.device.base.location": {
+                "kismet.common.location.geopoint": [
+                  -112.01,
+                  33.41
+                ],
+                "kismet.common.location.time_sec": 1700000025.0
+              }
+            }
+          }
+        },
+        {
+          "source": "gps",
+          "fix": {
+            "lat": 33.41,
+            "lon": -112.01,
+            "ts": 1700000027.0,
+            "accuracy_m": 8.0
+          }
+        }
+      ]
+    },
+    {
+      "cycle_id": 3,
+      "clock_ts": 1700000060.0,
+      "rows": [
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "AA:BB:CC:DD:EE:13",
+            "type": "Wi-Fi Client",
+            "last_time": 1700000055.0,
+            "device": {
+              "kismet.device.base.type": "Wi-Fi Client",
+              "kismet.device.base.location": {
+                "kismet.common.location.geopoint": [
+                  -112.02,
+                  33.42
+                ],
+                "kismet.common.location.time_sec": 1700000055.0
+              }
+            }
+          }
+        },
+        {
+          "source": "gps",
+          "fix": {
+            "lat": 33.42,
+            "lon": -112.02,
+            "ts": 1700000057.0,
+            "accuracy_m": 8.0
+          }
+        }
+      ]
+    },
+    {
+      "cycle_id": 4,
+      "clock_ts": 1700000090.0,
+      "rows": []
+    }
+  ]
+}

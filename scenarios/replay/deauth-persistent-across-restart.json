@@ -1,0 +1,123 @@
+{
+  "scenario_version": 1,
+  "scenario_id": "deauth-persistent-across-restart",
+  "description": "A deauth attack continues across a service restart: frames dated after the persisted watermark must re-observe the SAME incident (fresh last_seen), not duplicate it and not replay pre-restart history.",
+  "session_id": "replay-deauth-persistent-across-restart",
+  "labels": {
+    "kind": "suspicious",
+    "expect": {
+      "detect": true,
+      "state": "watch",
+      "max_latency_cycles": 1,
+      "entity_keys": [
+        "AA:BB:CC:DD:EE:02"
+      ],
+      "max_incidents": 1
+    }
+  },
+  "config_overrides": {
+    "deauth_detection": {
+      "min_events_for_attack": 2
+    }
+  },
+  "restarts": [
+    2
+  ],
+  "cycles": [
+    {
+      "cycle_id": 1,
+      "clock_ts": 1700000000.0,
+      "rows": [
+        {
+          "source": "kismet.alerts",
+          "row": {
+            "ts_sec": 1699999994.0,
+            "header": "DEAUTH",
+            "json": {
+              "kismet.alert.header": "DEAUTH",
+              "kismet.alert.text": "Detected deauthentication attack",
+              "kismet.alert.source_mac": "AA:BB:CC:DD:EE:01",
+              "kismet.alert.dest_mac": "AA:BB:CC:DD:EE:02",
+              "kismet.alert.channel": 6
+            },
+            "src_mac": "AA:BB:CC:DD:EE:01",
+            "dst_mac": "AA:BB:CC:DD:EE:02",
+            "bssid": ""
+          }
+        },
+        {
+          "source": "kismet.alerts",
+          "row": {
+            "ts_sec": 1699999997.0,
+            "header": "DEAUTH",
+            "json": {
+              "kismet.alert.header": "DEAUTH",
+              "kismet.alert.text": "Detected deauthentication attack",
+              "kismet.alert.source_mac": "AA:BB:CC:DD:EE:01",
+              "kismet.alert.dest_mac": "AA:BB:CC:DD:EE:02",
+              "kismet.alert.channel": 6
+            },
+            "src_mac": "AA:BB:CC:DD:EE:01",
+            "dst_mac": "AA:BB:CC:DD:EE:02",
+            "bssid": ""
+          }
+        }
+      ]
+    },
+    {
+      "cycle_id": 2,
+      "clock_ts": 1700000030.0,
+      "rows": []
+    },
+    {
+      "cycle_id": 3,
+      "clock_ts": 1700000060.0,
+      "rows": [
+        {
+          "source": "kismet.alerts",
+          "row": {
+            "ts_sec": 1700000058.0,
+            "header": "DEAUTH",
+            "json": {
+              "kismet.alert.header": "DEAUTH",
+              "kismet.alert.text": "Detected deauthentication attack",
+              "kismet.alert.source_mac": "AA:BB:CC:DD:EE:01",
+              "kismet.alert.dest_mac": "AA:BB:CC:DD:EE:02",
+              "kismet.alert.channel": 6
+            },
+            "src_mac": "AA:BB:CC:DD:EE:01",
+            "dst_mac": "AA:BB:CC:DD:EE:02",
+            "bssid": ""
+          }
+        },
+        {
+          "source": "kismet.alerts",
+          "row": {
+            "ts_sec": 1700000059.0,
+            "header": "DEAUTH",
+            "json": {
+              "kismet.alert.header": "DEAUTH",
+              "kismet.alert.text": "Detected deauthentication attack",
+              "kismet.alert.source_mac": "AA:BB:CC:DD:EE:01",
+              "kismet.alert.dest_mac": "AA:BB:CC:DD:EE:02",
+              "kismet.alert.channel": 6
+            },
+            "src_mac": "AA:BB:CC:DD:EE:01",
+            "dst_mac": "AA:BB:CC:DD:EE:02",
+            "bssid": ""
+          }
+        }
+      ]
+    },
+    {
+      "cycle_id": 4,
+      "clock_ts": 1700000090.0,
+      "rows": []
+    },
+    {
+      "cycle_id": 5,
+      "clock_ts": 1700000120.0,
+      "rows": []
+    }
+  ]
+}

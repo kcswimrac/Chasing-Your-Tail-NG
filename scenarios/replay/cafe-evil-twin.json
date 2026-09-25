@@ -1,0 +1,129 @@
+{
+  "scenario_version": 1,
+  "scenario_id": "cafe-evil-twin",
+  "description": "A spoofing access point advertising the operator's trusted network with weaker encryption, then persisting across a service restart",
+  "session_id": "replay-cafe-evil-twin",
+  "labels": {
+    "kind": "suspicious",
+    "expect": {
+      "detect": true,
+      "state": "alert",
+      "max_latency_cycles": 2,
+      "entity_keys": [
+        "BB:BB:CC:00:99:99"
+      ],
+      "max_incidents": 1
+    }
+  },
+  "config_overrides": {
+    "rogue_ap_detection": {
+      "trusted_aps": [
+        {
+          "ssid": "CafeNet",
+          "bssid": "BB:BB:CC:00:11:01",
+          "encryption": "WPA2-PSK",
+          "channel": 6
+        }
+      ]
+    }
+  },
+  "restarts": [
+    2
+  ],
+  "cycles": [
+    {
+      "cycle_id": 1,
+      "clock_ts": 1700000000.0,
+      "rows": [
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "BB:BB:CC:00:11:01",
+            "type": "Wi-Fi AP",
+            "last_time": 1699999990.0,
+            "device": {
+              "dot11.device": {
+                "dot11.device.advertised_ssid_map": [
+                  {
+                    "dot11.advertisedssid.ssid": "CafeNet",
+                    "dot11.advertisedssid.crypt_string": "WPA2-PSK"
+                  }
+                ]
+              },
+              "kismet.device.base.channel": "6"
+            }
+          }
+        },
+        {
+          "source": "gps",
+          "fix": {
+            "lat": 45.52,
+            "lon": -122.68,
+            "ts": 1699999995.0,
+            "accuracy_m": 8.0
+          }
+        }
+      ]
+    },
+    {
+      "cycle_id": 2,
+      "clock_ts": 1700000020.0,
+      "rows": [
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "BB:BB:CC:00:99:99",
+            "type": "Wi-Fi AP",
+            "last_time": 1700000015.0,
+            "device": {
+              "dot11.device": {
+                "dot11.device.advertised_ssid_map": [
+                  {
+                    "dot11.advertisedssid.ssid": "CafeNet",
+                    "dot11.advertisedssid.crypt_string": "WEP"
+                  }
+                ]
+              },
+              "kismet.device.base.channel": "11"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "cycle_id": 3,
+      "clock_ts": 1700000040.0,
+      "rows": []
+    },
+    {
+      "cycle_id": 4,
+      "clock_ts": 1700000060.0,
+      "rows": [
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "BB:BB:CC:00:99:99",
+            "type": "Wi-Fi AP",
+            "last_time": 1700000055.0,
+            "device": {
+              "dot11.device": {
+                "dot11.device.advertised_ssid_map": [
+                  {
+                    "dot11.advertisedssid.ssid": "CafeNet",
+                    "dot11.advertisedssid.crypt_string": "WEP"
+                  }
+                ]
+              },
+              "kismet.device.base.channel": "11"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "cycle_id": 5,
+      "clock_ts": 1700000080.0,
+      "rows": []
+    }
+  ]
+}

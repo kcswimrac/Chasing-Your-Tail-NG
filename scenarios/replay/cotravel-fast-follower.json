@@ -1,13 +1,19 @@
 {
   "scenario_version": 1,
-  "scenario_id": "walk-cotravel",
-  "description": "Operator walk with a device co-present at two distinct stops: the co-travel detector should raise a cotravel incident. The operator's own phone co-travels with itself by construction (operator self-identity is out of scope per the build spec), so the follower's incident is the one labeled detect.",
-  "session_id": "replay-walk-cotravel",
+  "scenario_id": "cotravel-fast-follower",
+  "description": "A close-range follower moving with the operator between two nearby (130 m) but distinct places within 30 seconds: a short-span tail that still crosses the two-location floor.",
+  "session_id": "replay-cotravel-fast-follower",
   "labels": {
     "kind": "suspicious",
     "expect": {
       "detect": true,
-      "state": "watch"
+      "state": "watch",
+      "max_latency_cycles": 2,
+      "entity_keys": [
+        "AA:BB:CC:00:00:01",
+        "AA:BB:CC:00:00:43"
+      ],
+      "max_incidents": 2
     }
   },
   "config_overrides": {
@@ -32,7 +38,10 @@
             "device": {
               "kismet.device.base.type": "Wi-Fi Client",
               "kismet.device.base.location": {
-                "kismet.common.location.geopoint": [-112.0, 33.4],
+                "kismet.common.location.geopoint": [
+                  -112.0,
+                  33.4
+                ],
                 "kismet.common.location.time_sec": 1699999990.0
               }
             }
@@ -41,13 +50,16 @@
         {
           "source": "kismet.devices",
           "row": {
-            "devmac": "AA:BB:CC:00:00:99",
+            "devmac": "AA:BB:CC:00:00:43",
             "type": "Wi-Fi Client",
             "last_time": 1699999990.0,
             "device": {
               "kismet.device.base.type": "Wi-Fi Client",
               "kismet.device.base.location": {
-                "kismet.common.location.geopoint": [-112.0, 33.4],
+                "kismet.common.location.geopoint": [
+                  -112.0,
+                  33.4
+                ],
                 "kismet.common.location.time_sec": 1699999990.0
               }
             }
@@ -57,19 +69,22 @@
     },
     {
       "cycle_id": 2,
-      "clock_ts": 1700000060.0,
+      "clock_ts": 1700000030.0,
       "rows": [
         {
           "source": "kismet.devices",
           "row": {
             "devmac": "AA:BB:CC:00:00:01",
             "type": "Wi-Fi Client",
-            "last_time": 1700000050.0,
+            "last_time": 1700000020.0,
             "device": {
               "kismet.device.base.type": "Wi-Fi Client",
               "kismet.device.base.location": {
-                "kismet.common.location.geopoint": [-112.01, 33.41],
-                "kismet.common.location.time_sec": 1700000050.0
+                "kismet.common.location.geopoint": [
+                  -112.0009,
+                  33.4009
+                ],
+                "kismet.common.location.time_sec": 1700000020.0
               }
             }
           }
@@ -77,20 +92,27 @@
         {
           "source": "kismet.devices",
           "row": {
-            "devmac": "AA:BB:CC:00:00:99",
+            "devmac": "AA:BB:CC:00:00:43",
             "type": "Wi-Fi Client",
-            "last_time": 1700000045.0,
+            "last_time": 1700000020.0,
             "device": {
               "kismet.device.base.type": "Wi-Fi Client",
               "kismet.device.base.location": {
-                "kismet.common.location.geopoint": [-112.01, 33.41],
-                "kismet.common.location.time_sec": 1700000045.0
+                "kismet.common.location.geopoint": [
+                  -112.0009,
+                  33.4009
+                ],
+                "kismet.common.location.time_sec": 1700000020.0
               }
             }
           }
         }
       ]
     },
-    { "cycle_id": 3, "clock_ts": 1700000120.0, "rows": [] }
+    {
+      "cycle_id": 3,
+      "clock_ts": 1700000060.0,
+      "rows": []
+    }
   ]
 }

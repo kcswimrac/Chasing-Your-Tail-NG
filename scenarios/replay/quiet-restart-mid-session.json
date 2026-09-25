@@ -1,0 +1,83 @@
+{
+  "scenario_version": 1,
+  "scenario_id": "quiet-restart-mid-session",
+  "description": "Quiet session with a service restart mid-air. A restart must never manufacture incidents on silent RF.",
+  "session_id": "replay-quiet-restart-mid-session",
+  "labels": {
+    "kind": "normal",
+    "expect": {
+      "detect": false,
+      "state": "clear"
+    }
+  },
+  "restarts": [
+    2
+  ],
+  "cycles": [
+    {
+      "cycle_id": 1,
+      "clock_ts": 1700000000.0,
+      "rows": [
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "AA:BB:CC:DD:EE:01",
+            "type": "Wi-Fi Client",
+            "last_time": 1699999995.0,
+            "device": {
+              "kismet.device.base.signal": {
+                "kismet.common.signal.last_signal": -60
+              },
+              "kismet.device.base.channel": "6"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "cycle_id": 2,
+      "clock_ts": 1700000030.0,
+      "rows": [
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "AA:BB:CC:DD:EE:01",
+            "type": "Wi-Fi Client",
+            "last_time": 1700000025.0,
+            "device": {
+              "kismet.device.base.signal": {
+                "kismet.common.signal.last_signal": -60
+              },
+              "kismet.device.base.channel": "6"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "cycle_id": 3,
+      "clock_ts": 1700000060.0,
+      "rows": [
+        {
+          "source": "kismet.devices",
+          "row": {
+            "devmac": "AA:BB:CC:DD:EE:02",
+            "type": "Wi-Fi Client",
+            "last_time": 1700000055.0,
+            "device": {
+              "kismet.device.base.signal": {
+                "kismet.common.signal.last_signal": -60
+              },
+              "kismet.device.base.channel": "6"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "cycle_id": 4,
+      "clock_ts": 1700000090.0,
+      "rows": []
+    }
+  ]
+}
