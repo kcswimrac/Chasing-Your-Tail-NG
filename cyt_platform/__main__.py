@@ -6,7 +6,8 @@ import argparse
 import sys
 
 
-def main(argv: list[str] | None = None) -> int:
+def build_parser() -> argparse.ArgumentParser:
+    """The CLI parser, exposed for tests (docs-claim flag verification)."""
     parser = argparse.ArgumentParser(
         prog="cyt-analyzer",
         description="CYT EDC platform (P0–P3: service, trust, debrief, RF)",
@@ -133,6 +134,60 @@ def main(argv: list[str] | None = None) -> int:
         help="Write the evaluation summary JSON to this path (default: stdout)",
     )
 
+    def _config_flag(sp):
+        # Accept -c on either side of the subcommand. SUPPRESS keeps the
+        # parent's value when the subcommand form is absent.
+        sp.add_argument(
+            "-c",
+            "--config",
+            default=argparse.SUPPRESS,
+            help="Path to config.json (same as the top-level flag)",
+        )
+
+    st = sub.add_parser(
+        "status", help="One-glance system status (status.json + store counts)"
+    )
+    st.add_argument("--json", action="store_true", help="Machine-readable output")
+    _config_flag(st)
+
+    _doctor = sub.add_parser(
+        "doctor", help="Per-check environment report (PASS/WARN/FAIL with detail)"
+    )
+    _config_flag(_doctor)
+
+    cf = sub.add_parser("config", help="Configuration utilities")
+    cf_sub = cf.add_subparsers(dest="config_cmd", required=True)
+    cf_sub.add_parser("check", help="Validate the config file (key+reason+range errors)")
+
+    inc = sub.add_parser("incident", help="Inspect and disposition incidents")
+    inc_sub = inc.add_subparsers(dest="incident_cmd", required=True)
+    inc_show = inc_sub.add_parser("show", help="Show one incident with its timeline")
+    inc_show.add_argument("key", help="Incident key (see: cyt status)")
+    inc_show.add_argument(
+        "--json", action="store_true", help="Machine-readable output"
+    )
+    _config_flag(inc_show)
+    for _verb, _verb_help in (
+        ("dismiss", "Disposition as FALSE_POSITIVE (feeds baseline learning)"),
+        ("confirm", "Disposition as KNOWN_DEVICE (your own device)"),
+        ("resolve", "Disposition as RESOLVED (staleness close)"),
+        ("reopen", "Re-open a terminal incident as NEW"),
+    ):
+        _inc = inc_sub.add_parser(_verb, help=_verb_help)
+        _inc.add_argument("key", help="Incident key")
+        _inc.add_argument(
+            "--reason", default="", help="Why (recorded in the audit timeline)"
+        )
+        _inc.add_argument(
+            "--json", action="store_true", help="Machine-readable output"
+        )
+        _config_flag(_inc)
+
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
     args = parser.parse_args(argv)
 
     if args.init_store_key:
@@ -207,6 +262,9 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         finally:
             store.close()
+
+    if args.cmd in ("status", "doctor", "config", "incident"):
+        return _operator_cmd(args)
 
     if args.cmd == "replay":
         return _replay_cmd(args)
@@ -317,6 +375,143 @@ def _baseline_cmd(args) -> int:
             return 0
         print("Usage: baseline list|mark|forget", file=sys.stderr)
         return 1
+    finally:
+        store.close()
+
+
+# --- D10 operator surface: status / doctor / config check / incident ---------
+
+
+def _load_config_or_exit(config_path):
+    """Config errors are operator-facing: message + exit 1, no traceback."""
+    from cyt_platform.config import ConfigError, load_json
+
+    try:
+        return load_json(config_path), None
+    except ConfigError as e:
+        print(f"Config error:\n{e}", file=sys.stderr)
+        return None, 1
+    except FileNotFoundError as e:
+        print(f"Config error: {e}", file=sys.stderr)
+        return None, 1
+
+
+def _operator_cmd(args) -> int:
+    from cyt_platform.doctor import doctor as run_doctor
+
+    if args.cmd == "status":
+        return _status_cmd(args)
+    if args.cmd == "doctor":
+        return run_doctor(args.config)
+    if args.cmd == "config":
+        return _config_check_cmd(args)
+    if args.cmd == "incident":
+        return _incident_cmd(args)
+    raise AssertionError(f"unhandled operator subcommand: {args.cmd}")
+
+
+def _status_cmd(args) -> int:
+    from pathlib import Path
+
+    from cyt_platform.cli import load_json_result, print_status, status_report
+    from cyt_platform.crypto import sealed_path_for
+    from cyt_platform.privacy import apply_umask
+    from cyt_platform.store import CytStore
+
+    config, err = _load_config_or_exit(args.config)
+    if config is None:
+        return err
+    apply_umask(config)
+    logical = Path((config.get("store") or {}).get("path") or "data/cyt.db")
+    if not logical.exists() and not sealed_path_for(logical).exists():
+        print(f"no store yet at {logical} — the first service run creates it")
+        return 0
+    store = CytStore.open(config.get("store") or {})
+    try:
+        report = status_report(config, store)
+    finally:
+        store.close()
+    if args.json:
+        load_json_result(report)
+    else:
+        print_status(report)
+    return 0
+
+
+def _config_check_cmd(args) -> int:
+    from cyt_platform.config import load_json
+
+    try:
+        load_json(args.config)
+    except FileNotFoundError as e:
+        print(f"config check: FAIL {e}")
+        return 1
+    except ValueError as e:  # ConfigError rides ValueError: key+reason+range
+        print(f"config check: FAIL\n{e}")
+        return 1
+    print("config check: OK")
+    return 0
+
+
+def _incident_cmd(args) -> int:
+    from cyt_platform.cli import (
+        IncidentCliError,
+        dispose,
+        incident_detail,
+        load_json_result,
+        print_transition,
+        reopen,
+    )
+    from cyt_platform.privacy import apply_umask, sanitize_error
+    from cyt_platform.store import CytStore
+
+    config, err = _load_config_or_exit(args.config)
+    if config is None:
+        return err
+    apply_umask(config)
+    try:
+        store = CytStore.open(config.get("store") or {})
+    except Exception as e:  # noqa: BLE001 - operator-facing
+        print(f"error: cannot open store: {sanitize_error(e)}", file=sys.stderr)
+        return 2
+    try:
+        if args.incident_cmd == "show":
+            detail = incident_detail(store, args.key)
+            if args.json:
+                load_json_result(detail)
+            else:
+                print(f"incident {detail['incident_key']}")
+                print(
+                    f"  state: {detail['lifecycle_state']}  "
+                    f"confidence: {detail['confidence']}  "
+                    f"severity: {detail['severity']}"
+                )
+                print(f"  last_seen: {detail['last_seen']}")
+                if detail.get("disposition"):
+                    print(f"  disposition: {detail['disposition']}")
+                for entry in detail["timeline"]:
+                    print(
+                        f"  [{entry['ts']:.0f}] {entry['from_state']} -> "
+                        f"{entry['to_state']}: {entry['reason']}"
+                    )
+            return 0
+        if args.incident_cmd == "reopen":
+            result = reopen(store, args.key, args.reason)
+        else:
+            result = dispose(store, config, args.key, args.incident_cmd, args.reason)
+        if args.json:
+            load_json_result(result)
+        else:
+            print_transition(result)
+        return 0
+    except IncidentCliError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    except ValueError as e:
+        # Illegal lifecycle moves raise InvalidTransition (a ValueError):
+        # the operator sees the rule, not a traceback.
+        print(f"error: {e}", file=sys.stderr)
+        return 2
     finally:
         store.close()
 

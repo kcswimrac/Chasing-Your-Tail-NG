@@ -17,6 +17,9 @@ dependencies = [
 dev = ["pytest>=7.0.0", "ruff>=0.4.0"]
 
 [project.scripts]
+# `cyt-analyzer` is the historical name; `cyt` is the short operator form
+# used throughout the docs (README, FIELD_DEPLOY). Both run the same entry.
+cyt = "cyt_platform.__main__:main"
 cyt-analyzer = "cyt_platform.__main__:main"
 
 [tool.setuptools.packages.find]

@@ -29,7 +29,7 @@ This project has been security-hardened to eliminate critical vulnerabilities:
 
 ## Requirements
 
-- Python 3.6+
+- Python 3.9+ (CI tests 3.9 and 3.13)
 - Kismet wireless packet capture
 - Wi-Fi adapter supporting monitor mode
 - Linux-based system
@@ -77,7 +77,36 @@ python -m cyt_platform --legacy-loop
 # or: python3 chasing_your_tail.py --legacy-loop
 ```
 
-Status glance file: `data/run/status.json` → `state`: `clear` | `watch` | `alert` | `fail`.
+Status glance file: `data/run/status.json` → `state`: `clear` | `watch` | `alert` | `degraded` | `fail`.
+
+### Operator CLI (cyt)
+
+Every command below works as `cyt <cmd>` (console script) or
+`python -m cyt_platform <cmd>` — they are the same entry point.
+
+```bash
+# One-glance status: state, open phenomenon incidents, components (add --json for machine output)
+cyt status
+
+# Per-check environment report: config, store schema v4, kismet captures,
+# status publish path, LED path, detector registration (PASS/WARN/FAIL)
+cyt doctor
+
+# Validate the config file: invalid values print key + reason + acceptable range
+cyt config check
+
+# Inspect and disposition incidents (the state machine rejects illegal moves with exit 2)
+cyt incident show <key>
+cyt incident dismiss <key> --reason "my own router"   # false_positive
+cyt incident confirm <key> --reason "my device"       # known_device
+cyt incident resolve <key> --reason "handing off"     # resolved (needs a progressed incident)
+cyt incident reopen <key> --reason "still seeing it"  # terminal states only
+
+# Deterministic replay of a labeled scenario; `cyt eval` runs the full corpus
+# against eval/gates.json (exit 0 pass, 1 gate failure, 2 harness/gates error)
+cyt replay --session scenarios/replay/commute-quiet.json
+cyt eval
+```
 
 ### P1 Trust (encryption, baseline, LED, wipe)
 ```bash
@@ -163,8 +192,8 @@ python3 surveillance_analyzer.py --demo
 # Analyze specific Kismet database
 python3 surveillance_analyzer.py --kismet-db /path/to/kismet.db
 
-# Focus on stalking detection with high persistence threshold
-python3 surveillance_analyzer.py --stalking-only --min-persistence 0.8
+# Focus on stalking detection with a high threat threshold
+python3 surveillance_analyzer.py --stalking-only --min-threat 0.8
 
 # Export results to JSON for further analysis
 python3 surveillance_analyzer.py --output-json analysis_results.json
@@ -176,9 +205,9 @@ python3 surveillance_analyzer.py --gps-file gps_coordinates.json
 ### Ignore List Management
 ```bash
 # Create new ignore lists from current Kismet data
-python3 legacy/create_ignore_list.py  # Moved to legacy folder
+python3 create_ignore_list.py
 ```
-**Note**: Ignore lists are now stored as JSON files in `./ignore_lists/`
+**Note**: Ignore lists are stored as JSON files in `./ignore_lists/`
 
 ## Core Components
 
@@ -211,11 +240,6 @@ python3 legacy/create_ignore_list.py  # Moved to legacy folder
 ### Configuration & Data
 - **Ignore Lists**: `./ignore_lists/mac_list.json`, `./ignore_lists/ssid_list.json`
 - **Encrypted Credentials**: `./secure_credentials/encrypted_credentials.json`
-
-### Archive Directories (Cleaned July 23, 2025)
-- **old_scripts/**: All broken startup scripts with hanging pkill commands
-- **docs_archive/**: Session notes, old configs, backup files, duplicate logs
-- **legacy/**: Original legacy code archive (pre-security hardening)
 
 ## Technical Architecture
 
