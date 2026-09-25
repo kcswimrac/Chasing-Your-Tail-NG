@@ -214,10 +214,15 @@ def test_repetition_only_detection_cannot_alert():
 
 
 def test_multi_kind_detection_survives_the_alert_gate():
-    """Deauth-style evidence spans 3 kinds: the gate does not demote."""
-    fused = fuse([_result()])
+    """Two REAL detectors on one subject (deauth + co-travel): the gate
+    passes the alert through. One deauth row alone is ONE observation — its
+    facets are self-reference kinds, so the gate demotes it to watch."""
+    fused = fuse([_result(), _result(detector="cotravel", kinds=("copresence", "travel_span", "score"))])
     assert fused.may_alert
     assert alert_gate(fused, "alert") == "alert"
+    single = fuse([_result()])
+    assert not single.may_alert
+    assert alert_gate(single, "alert") == "watch"
 
 
 def test_alert_gate_never_upgrades_and_ignores_non_alert():
@@ -343,13 +348,11 @@ def test_fused_evidence_block_is_json_safe_and_preserves_keys():
     assert fields["evidence"]["reasons"] == original_reasons
     assert fields["evidence"]["kind"] == "deauth"
     assert json.loads(json.dumps(fields)) == fields
-    assert block["may_alert"] is True
+    # S1: the three deauth facets contribute weight, but only
+    # deauth_pattern is independent — one row cannot alert by itself.
+    assert block["may_alert"] is False
     assert 0.0 < block["confidence"] <= 0.99
-    assert block["independent_kinds"] == [
-        "attack_signature",
-        "deauth_pattern",
-        "source_severity",
-    ]
+    assert block["independent_kinds"] == ["deauth_pattern"]
     # The stored block is exactly the module's block for the fused
     # assessment (deterministic fusion makes the fresh rebuild equal).
     assert block == fused_evidence(fuse([_result()]))
@@ -360,7 +363,9 @@ def test_fused_evidence_block_is_json_safe_and_preserves_keys():
 
 def test_fused_block_reaches_status_alert_output(tmp_path):
     """The block an operator sees via status.json's evidence carries the
-    fused why/against with weights intact."""
+    fused why/against with weights intact. A single alert-severity deauth
+    row is held at watch by the gate (one independent kind), and the block
+    still reaches status with its evidence."""
     from cyt_platform.store import CytStore
 
     store = CytStore.open({"path": str(tmp_path / "fusion.db")})
@@ -374,7 +379,7 @@ def test_fused_block_reaches_status_alert_output(tmp_path):
     top_hits = store.list_open_incident_evidence(hold_seconds=300, limit=5)
     assert top_hits, "incident must be visible in the status evidence window"
     block = top_hits[0]["evidence"]["fusion"]
-    assert block["may_alert"] is True
+    assert block["may_alert"] is False
     assert block["confidence"] > 0.0
     assert any(line["kind"] == "deauth_pattern" for line in block["why"])
     assert "Confidence:" in block["text"]
@@ -414,7 +419,9 @@ def test_runner_emit_carries_fused_block(tmp_path):
     ).fetchone()
     assert row is not None
     block = json.loads(row["evidence_json"])["fusion"]
-    assert block["may_alert"] is True
+    # One alert-severity attack row is one observation: its facets are
+    # self-reference kinds, so the block records the demotion.
+    assert block["may_alert"] is False
     assert block["detectors"] == ["deauth"]
     assert any(line["kind"] == "attack_signature" for line in block["why"])
     store.close()
@@ -467,7 +474,18 @@ def test_fuse_by_subject_groups_and_fuses():
         severity="info",
         summary="ctx",
     )
-    fused = fuse_by_subject([_result(), ble, context])
+    # Two real detectors on the main subject: the group clears the gate.
+    fused = fuse_by_subject(
+        [
+            _result(),
+            _result(
+                detector="cotravel",
+                kinds=("copresence", "travel_span", "score"),
+            ),
+            ble,
+            context,
+        ]
+    )
     assert set(fused) == {SUBJECT, "CC:DD:EE:00:00:01"}
     assert fused[SUBJECT].against  # the context contra landed on its subject
     assert fused[SUBJECT].may_alert

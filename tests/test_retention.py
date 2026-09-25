@@ -6,10 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from cyt_platform.detectors import DetectionResult, EvidenceLine, incident_fields
-from cyt_platform.fused_evidence import attach as attach_fusion
+from cyt_platform.config import DEFAULTS
 from cyt_platform.incidents import IncidentEngine, IncidentStatus
 from cyt_platform.store import CytStore, RETENTION_CLASSES
+
+from conftest import cotravel_sighting, deauth_attack, emit_result
 
 BASE = 1_700_000_000.0
 DAYS = 86400
@@ -267,48 +268,18 @@ def test_hypothesis_retention_only_stale_candidates(store: CytStore):
 
 # --- S14: purge over engine-managed incidents (timeline children) ----------
 
-V2_CFG = {
-    "fusion": {"weights": {"window_match": 0.5, "cotravel_visit": 0.5}},
-    "incidents_v2": {
-        "enabled": True,
-        "watch_confidence": 0.30,
-        "alert_confidence": 0.60,
-        "alert_min_detectors": 2,
-        "close_after_s": 600.0,
-        "decay_grace_s": 120.0,
-    },
-}
-
 
 def _close_engine_incident_through_disposition(store: CytStore) -> str:
     """Drive one real phenomenon incident to a closed disposition.
 
-    Uses the exact emit path contract detectors use (incident_fields +
-    fusion attach + observe_incident), so the incident goes through real
-    lifecycle transitions and carries incident_timeline and
-    incident_contributions children — the shape test fixtures never
-    created before S14.
+    Emits real detector results (the production builders) so the incident
+    goes through genuine lifecycle transitions and carries
+    incident_timeline and incident_contributions children — the shape test
+    fixtures never created before S14.
     """
-    engine = IncidentEngine(store, V2_CFG)
-
-    def emit(detector: str, kind: str) -> None:
-        result = DetectionResult(
-            detector=detector,
-            kind=detector,
-            subject=MAC,
-            subject_type="wifi_mac",
-            window_label="15-20",
-            severity="watch",
-            observed_at=BASE,
-            summary=f"{detector} on {MAC}",
-            evidence=(EvidenceLine(kind, f"{kind} detail"),),
-        )
-        fields = incident_fields(result, session_id="sess-purge")
-        attach_fusion(fields, result)
-        store.observe_incident(**fields)
-
-    emit("mac_reappear", "window_match")
-    emit("cotravel", "cotravel_visit")
+    engine = IncidentEngine(store, dict(DEFAULTS))
+    emit_result(store, deauth_attack(), session_id="sess-purge")
+    emit_result(store, cotravel_sighting(), session_id="sess-purge")
     plans = engine.apply(now=BASE)
     assert plans, "fixture failed to drive lifecycle transitions"
 
