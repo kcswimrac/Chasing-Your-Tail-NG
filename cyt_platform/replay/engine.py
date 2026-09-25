@@ -232,7 +232,8 @@ class ReplayEngine:
                     kdb.max_ts = cycle.clock_ts
                     recorded = self._ingest_cycle(store, cycle)
                     self._apply_faults(runner, cycle.cycle_id)
-                    stats = self._detect(store, runner, kdb, fixture)
+                    scan_db = fixture.snapshot_until(cycle.clock_ts)
+                    stats = self._detect(store, runner, kdb, scan_db)
                     state = self._compose_cycle_state(store, stats)
                     lifecycle_transitions = 0
                     if lifecycle is not None:
@@ -331,16 +332,18 @@ class ReplayEngine:
         return None
 
     def _detect(
-        self, store: Any, runner: Any, kdb: Any, fixture: KismetFixture
+        self, store: Any, runner: Any, kdb: Any, scan_db: Path
     ) -> Dict[str, Any]:
         # Same transaction shape as the service loop: watermark writes commit
         # atomically with the incidents derived from the same scan. The runner
         # owns every detector, including the gps fusion; its pull window now
-        # shares the runner's injected clock.
+        # shares the runner's injected clock. File-path detectors scan a
+        # per-cycle snapshot (rows <= this cycle's clock) — a live capture can
+        # never contain future rows, and replay must not either.
         with store.transaction():
             return runner.run_cycle(
                 kdb,
-                str(fixture.path),
+                str(scan_db),
                 now=self.clock.now(),
             )
 

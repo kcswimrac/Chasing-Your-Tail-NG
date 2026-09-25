@@ -1,0 +1,16 @@
+{
+  "gate_version": 1,
+  "notes": "Calibrated from the initial 32-scenario corpus run on the snapshot-fixed replay engine (feat/eval-corpus-gates, Sep 2026). Correctness gates are zero-tolerance product promises from the build spec: no false alerts on normal air, no silent misses on follower patterns, byte-identical determinism, restart equivalence, inert display rendering. worst_latency_cycles=2 is the observed corpus-wide slowest first detection (evil twins at the twin's cycle, co-travel at the second stop). It is set to the exact observed value on purpose: replay is deterministic, so any move of this number is a behavior change that must be reviewed and re-calibrated, never auto-waived.",
+  "false_alert_scenarios": 0,
+  "false_incident_scenarios": 0,
+  "missed_scenarios": 0,
+  "latency_breaches": 0,
+  "state_mismatch_scenarios": 0,
+  "entity_mismatch_scenarios": 0,
+  "excess_incident_scenarios": 0,
+  "determinism_breaches": 0,
+  "restart_breaches": 0,
+  "raw_render_breaches": 0,
+  "label_violations": 0,
+  "worst_latency_cycles": 2
+}
