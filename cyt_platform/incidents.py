@@ -347,7 +347,12 @@ INCIDENTS_V2_DEFAULTS: Dict[str, Any] = {
     "reopen_disposition_s": 604800.0,  # 7 days
 }
 
-CURSOR_RUNTIME_KEY = "incidents_v2_cursor"
+# S12: the consumption cursor is a SEQUENCE (store-assigned updated_seq),
+# not a timestamp. A timestamp cursor — max(now, newest_last_seen) —
+# silently skipped rows filed later whose evidence time trailed the cycle
+# clock (deauth results carry the attack's last-frame time). The old
+# "incidents_v2_cursor" key is migrated away in the store's v4 block.
+CURSOR_RUNTIME_KEY = "incidents_v2_cursor_seq"
 
 
 def phenomenon_key_for(subject_type: str, subject: str) -> str:
@@ -457,10 +462,11 @@ class IncidentEngine:
     # --- detection consumption ---
 
     def _detection_pass(self, now: float) -> List[TransitionPlan]:
-        cursor = float(self.store.get_runtime(CURSOR_RUNTIME_KEY) or 0.0)
-        rows = self.store.touched_incidents_since(cursor)
+        rows = self.store.touched_incidents_since(self._load_cursor())
         if not rows:
-            self._advance_cursor(now, rows, cursor)
+            # Nothing consumed: a sequence cursor does not advance on wall
+            # time (S12). Anything filed after this pass — even with
+            # evidence time behind `now` — is picked up next cycle.
             return []
 
         plans: List[TransitionPlan] = []
@@ -515,15 +521,25 @@ class IncidentEngine:
                 plans.extend(
                     self._advance(existing, assessment, group_rows, now)
                 )
-        self._advance_cursor(now, rows, cursor)
+        self._advance_cursor(rows)
         return plans
 
-    def _advance_cursor(
-        self, now: float, rows: List[dict], cursor: float
-    ) -> None:
-        """Persist the consumption cursor (restart-safe, watermark-shaped)."""
-        newest = max((float(r["last_seen"]) for r in rows), default=cursor)
-        self.store.set_runtime(CURSOR_RUNTIME_KEY, repr(max(now, newest)))
+    def _load_cursor(self) -> int:
+        raw = self.store.get_runtime(CURSOR_RUNTIME_KEY)
+        return int(float(raw)) if raw else 0
+
+    def _advance_cursor(self, rows: List[dict]) -> None:
+        """Persist the consumption cursor (restart-safe, watermark-shaped).
+
+        Sequence-based (S12): the cursor runs on ``updated_seq`` — the
+        sequence the store assigns when a row is filed or re-filed — never
+        on evidence time, so late-stamped rows are never skipped. Rows only
+        move the cursor forward; quiet cycles advance nothing.
+        """
+        newest = max(int(r["updated_seq"]) for r in rows)
+        self.store.set_runtime(
+            CURSOR_RUNTIME_KEY, repr(max(self._load_cursor(), newest))
+        )
 
     def _group_by_phenomenon(self, rows: List[dict]) -> Dict[str, List[dict]]:
         groups: Dict[str, List[dict]] = {}
