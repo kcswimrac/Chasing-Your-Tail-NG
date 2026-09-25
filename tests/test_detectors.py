@@ -101,6 +101,66 @@ def test_deauth_result_reasons_are_the_precontract_strings():
     ]
 
 
+def _rogue_alert(**overrides):
+    from types import SimpleNamespace
+
+    kwargs = {
+        "ssid": "CoffeeShop Guest",
+        "rogue_bssid": "aa:bb:cc:00:00:77",
+        "severity": "HIGH",
+        "timestamp": 1699999996.0,
+        "reasons": ["SSID match", "BSSID not in baseline"],
+    }
+    kwargs.update(overrides)
+    return SimpleNamespace(**kwargs)
+
+
+def test_rogue_result_maps_alert_to_contract():
+    from cyt_platform.rf_plugins import _rogue_result
+
+    result = _rogue_result(_rogue_alert(), now=1700000000.0)
+    assert result.detector == "rogue"
+    assert result.kind == "rogue_ap"
+    assert result.subject == "AA:BB:CC:00:00:77"
+    assert result.subject_type == "wifi_ap"
+    assert result.window_label == "ap"
+    assert result.severity == "alert"
+    assert result.observed_at == 1699999996.0
+    # Privacy: SSID length, never SSID text.
+    assert result.detail == {
+        "ssid_len": 16,
+        "reasons": ["SSID match", "BSSID not in baseline"],
+    }
+    assert [line.kind for line in result.evidence] == [
+        "rogue_reason",
+        "rogue_reason",
+    ]
+    assert result.confidence is None
+
+
+def test_rogue_result_reason_fallback_and_severity_band():
+    from cyt_platform.rf_plugins import _rogue_result
+
+    result = _rogue_result(
+        _rogue_alert(reasons=None, severity="MEDIUM"), now=1700000000.0
+    )
+    assert result.severity == "watch"
+    assert result.evidence[0].detail == "Rogue/evil-twin AP detected"
+
+
+def test_rogue_result_reasons_are_the_precontract_strings():
+    from cyt_platform.rf_plugins import _rogue_result
+
+    result = _rogue_result(_rogue_alert(), now=1700000000.0)
+    fields = incident_fields(result, session_id="s")
+    assert fields["evidence"]["reasons"] == [
+        "SSID match",
+        "BSSID not in baseline",
+    ]
+    assert fields["detail"]["ssid_len"] == 16
+    assert fields["summary"] == "rogue_ap ssid_present"
+
+
 # --- validation ---------------------------------------------------------------
 
 

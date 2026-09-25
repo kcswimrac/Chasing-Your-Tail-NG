@@ -113,6 +113,34 @@ def _deauth_result(atk: Any, now: float) -> DetectionResult:
     )
 
 
+def _rogue_result(al: Any, now: float) -> DetectionResult:
+    """Build the contract result for one rogue-AP alert observation.
+
+    Pure: no store access. The alert's own reason list (up to five) is
+    carried as evidence lines; when the source supplies none, the
+    pre-contract default reason applies. Raw SSID text never enters the
+    result — only its length (the privacy policy for status surfaces).
+    """
+    reasons = list(
+        getattr(al, "reasons", None) or ["Rogue/evil-twin AP detected"]
+    )[:5]
+    return DetectionResult(
+        detector="rogue",
+        kind="rogue_ap",
+        subject=str(getattr(al, "rogue_bssid", "?")).upper(),
+        subject_type="wifi_ap",
+        window_label="ap",
+        severity=SCAN_SEVERITY_MAP.get(getattr(al, "severity", "HIGH"), "alert"),
+        observed_at=getattr(al, "timestamp", None) or now,
+        summary="rogue_ap ssid_present",
+        detail={"ssid_len": len(str(getattr(al, "ssid", "?"))), "reasons": reasons},
+        evidence=tuple(
+            EvidenceLine("rogue_reason", reason) for reason in reasons
+        ),
+        confidence=None,
+    )
+
+
 class RFPluginRunner:
     def __init__(
         self,
@@ -357,28 +385,14 @@ class RFPluginRunner:
         )
 
     def _incident_from_rogue(self, al: Any, now: float) -> None:
-        sev_map = {
-            "LOW": "watch",
-            "MEDIUM": "watch",
-            "HIGH": "alert",
-            "CRITICAL": "alert",
-        }
-        severity = sev_map.get(getattr(al, "severity", "HIGH"), "alert")
-        ssid = getattr(al, "ssid", "?")
-        bssid = getattr(al, "rogue_bssid", "?")
-        reasons = list(getattr(al, "reasons", None) or ["Rogue/evil-twin AP detected"])
+        """Emit one rogue-AP detection through the contract (D6).
+
+        Severity/reasons/detail are unchanged from the pre-contract adapter —
+        this is a shape migration, not a behavior change.
+        """
         self.store.observe_incident(
-            event_type="rogue_ap",
-            subject=str(bssid).upper(),
-            window_label="ap",
-            severity=severity,
-            session_id=self.store.get_runtime("session_id") or "rf",
-            observed_at=getattr(al, "timestamp", None) or now,
-            summary="rogue_ap ssid_present",
-            detail={"ssid_len": len(str(ssid)), "reasons": reasons[:5]},
-            entity_type="wifi_ap",
-            evidence={
-                "reasons": reasons[:5],
-                "kind": "rogue_ap",
-            },
+            **incident_fields(
+                _rogue_result(al, now),
+                session_id=self.store.get_runtime("session_id") or "rf",
+            )
         )
