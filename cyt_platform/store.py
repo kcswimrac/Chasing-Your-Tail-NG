@@ -745,21 +745,33 @@ class CytStore:
         self.set_runtime("session_id", session_id)
         return session_id
 
-    def set_runtime(self, key: str, value: str) -> None:
+    def set_runtime(self, key: str, value: str, *, encrypt: bool = False) -> None:
+        """Persist one runtime kv pair.
+
+        ``encrypt`` runs the value through field encryption before storage
+        (S13): window sets hold raw MACs and probe SSIDs, and persisting
+        them as plaintext would quietly undo ``field_encrypt`` for the most
+        identifying data the service holds. ``get_runtime`` decrypts
+        transparently, so legacy plaintext blobs keep reading back.
+        """
         now = time.time()
+        stored = self._enc_key(value) if encrypt else value
         self.conn.execute(
             """
             INSERT INTO runtime_state(key, value, ts) VALUES (?, ?, ?)
             ON CONFLICT(key) DO UPDATE SET value=excluded.value, ts=excluded.ts
             """,
-            (key, value, now),
+            (key, stored, now),
         )
 
     def get_runtime(self, key: str) -> Optional[str]:
         row = self.conn.execute(
             "SELECT value FROM runtime_state WHERE key = ?", (key,)
         ).fetchone()
-        return row["value"] if row else None
+        if not row:
+            return None
+        # transparent decrypt: encrypted values carry the enc:v1: prefix
+        return self._dec_key(row["value"])
 
     def upsert_entity(
         self,

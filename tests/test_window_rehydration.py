@@ -6,9 +6,11 @@ from pathlib import Path
 
 import pytest
 
+from cyt_platform.crypto import generate_key_file
 from cyt_platform.store import CytStore
 from cyt_platform.windows import (
     MAX_AGE_S,
+    WINDOW_RUNTIME_KEY,
     collect_window_sets,
     load_window_sets,
     merge_into_monitor,
@@ -127,3 +129,46 @@ def test_restart_restores_follower_graceless(tmp_path: Path, store: CytStore):
     # The follower is still in the past-5 slot: no fresh 20-min grace period.
     assert fresh.past_five_mins_macs == {FOLLOWER}
     assert fresh.past_five_mins_ssids == {FOLLOWER_SSID}
+
+
+def test_window_blob_is_encrypted_at_rest(tmp_path: Path):
+    """S13: field_encrypt must cover the persisted window sets.
+
+    The blob holds raw MACs and probe SSIDs; writing it as plaintext into
+    runtime_state would quietly undo field encryption for the most
+    identifying data the service holds.
+    """
+    key_path = tmp_path / "store.key"
+    generate_key_file(key_path)
+    store = CytStore.open(
+        {
+            "path": str(tmp_path / "win.db"),
+            "mode": "durable",
+            "encryption": {
+                "enabled": True,
+                "sealed": False,  # keep the open file inspectable
+                "field_encrypt": True,
+                "key_file": str(key_path),
+            },
+        }
+    )
+    try:
+        m = make_monitor()
+        m.past_five_mins_macs = {FOLLOWER}
+        m.five_ten_min_ago_ssids = {FOLLOWER_SSID}
+        save_window_sets(store, collect_window_sets(m), saved_ts=T0)
+
+        row = store.conn.execute(
+            "SELECT value FROM runtime_state WHERE key = ?", (WINDOW_RUNTIME_KEY,)
+        ).fetchone()
+        assert row["value"].startswith("enc:v1:")
+        assert FOLLOWER not in row["value"]
+        assert FOLLOWER_SSID not in row["value"]
+
+        # and the API still round-trips through transparent decryption
+        loaded = load_window_sets(store, now=T0)
+        assert loaded is not None
+        assert loaded["mac"]["past5"] == [FOLLOWER]
+        assert loaded["ssid"]["5-10"] == [FOLLOWER_SSID]
+    finally:
+        store.close()

@@ -16,6 +16,7 @@ import pytest
 
 from cyt_platform.config import DEFAULTS
 from cyt_platform.doctor import (
+    _check_key_files,
     FAIL,
     PASS,
     WARN,
@@ -65,6 +66,7 @@ def test_doctor_all_pass_on_fixture_env(env: Path):
         "kismet",
         "status_path",
         "led_path",
+        "key_files",
         "detectors",
     }
     failing = [r for r in results if r.status == FAIL]
@@ -182,3 +184,28 @@ def test_doctor_warns_when_all_detectors_disabled(tmp_path: Path, env: Path):
 def test_checkresult_is_a_plain_value():
     r = CheckResult("name", PASS, "detail")
     assert r.status == PASS and r.name == "name" and r.detail == "detail"
+
+
+def test_doctor_key_check_fails_on_weak_mode(tmp_path: Path, monkeypatch):
+    """S4: doctor flags a group-readable key with the same remediation the
+    runtime refuses on (fail closed)."""
+    monkeypatch.delenv("CYT_STORE_KEY_FILE", raising=False)
+    key = tmp_path / "store.key"
+    key.write_bytes(b"\x01" * 32)
+    key.chmod(0o640)
+    result = _check_key_files(
+        {"store": {"encryption": {"enabled": True, "key_file": str(key)}}}
+    )
+    assert result.status == FAIL
+    assert "chmod 600" in result.detail
+
+
+def test_doctor_key_check_passes_on_private_mode(tmp_path: Path, monkeypatch):
+    monkeypatch.delenv("CYT_STORE_KEY_FILE", raising=False)
+    key = tmp_path / "store.key"
+    key.write_bytes(b"\x01" * 32)
+    key.chmod(0o600)
+    result = _check_key_files(
+        {"store": {"encryption": {"enabled": True, "key_file": str(key)}}}
+    )
+    assert result.status == PASS

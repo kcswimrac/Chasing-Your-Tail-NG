@@ -66,14 +66,21 @@ def save_window_sets(
     sets: Dict[str, Dict[str, List[str]]],
     saved_ts: Optional[float] = None,
 ) -> None:
-    """Persist window slot sets to the durable store (runtime_state)."""
+    """Persist window slot sets to the durable store (runtime_state).
+
+    S13: the blob holds raw MACs and probe SSIDs, so it is encrypted with
+    the store key when field encryption is on (``get_runtime`` decrypts
+    transparently on load).
+    """
     payload = {
         "version": 1,
         "saved_ts": float(saved_ts if saved_ts is not None else time.time()),
         "mac": {slot: sorted(sets.get("mac", {}).get(slot, [])) for slot in _SLOTS},
         "ssid": {slot: sorted(sets.get("ssid", {}).get(slot, [])) for slot in _SLOTS},
     }
-    store.set_runtime(WINDOW_RUNTIME_KEY, json.dumps(payload, sort_keys=True))
+    store.set_runtime(
+        WINDOW_RUNTIME_KEY, json.dumps(payload, sort_keys=True), encrypt=True
+    )
 
 
 def age_window_sets(

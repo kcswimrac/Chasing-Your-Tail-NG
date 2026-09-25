@@ -67,6 +67,22 @@ def wipe_inventory(config: dict) -> List[Path]:
         for p in log_dir.glob("debrief_*.md"):
             candidates.append(p)
 
+    # Legacy batch-tool outputs: KML visualizations and surveillance reports
+    # carry plaintext identifiers (SSIDs, MACs) and live outside log_dir,
+    # where the legacy/generation-1 tools write them (surveillance_analyzer,
+    # deauth/rogue generate_report, cyt_gui).
+    for batch_dir in ("surveillance_reports", "kml_files"):
+        batch = Path.cwd() / batch_dir
+        if batch.is_dir():
+            for p in sorted(batch.rglob("*")):
+                if p.is_file():
+                    candidates.append(p)
+    # Any config_backup.json left by a pre-hardening migrate_credentials run
+    # is a plaintext copy of the secrets it claimed to secure (audit S4).
+    backup = Path.cwd() / "config_backup.json"
+    if backup.is_file():
+        candidates.append(backup)
+
     # LED state
     runtime = Path(paths_cfg.get("runtime_dir") or "data/run")
     candidates.append(runtime / "led.state")

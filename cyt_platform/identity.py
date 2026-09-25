@@ -254,10 +254,16 @@ def _signal_cadence(a: DeviceView, b: DeviceView):
 def score_link(
     a: DeviceView, b: DeviceView, ctx: Optional[LinkContext] = None
 ) -> Optional[IdentityHypothesis]:
-    """Score a candidate identity link; ``None`` means not even a candidate.
+    """Score a candidate identity link; ``None`` means nothing to record.
 
-    Hard rules (locked decision 3):
-      * co-observed pairs never link (veto, not a weight),
+    Returns None when the pair cannot even be a candidate: same identity,
+    or fused confidence below the candidate floor. Hard rules (locked
+    decision 3):
+      * co-observed pairs never link (veto, not a weight) — the veto is
+        itself a definitive negative, so it returns a REJECTED hypothesis
+        for the caller to persist (S15): the contradiction must outlive
+        observation retention, or a later rescore mints the link the veto
+        existed to prevent,
       * nothing below the candidate floor persists,
       * LINKED requires the confidence threshold AND >= ``min_support``
         shared probe SSIDs — a single shared SSID is a routine collision.
@@ -267,7 +273,21 @@ def score_link(
     if a.identity_key == b.identity_key:
         return None
     if _co_observed(a, b, ctx.window_s):
-        return None
+        now = ctx.now if ctx.now is not None else time.time()
+        lo, hi = sorted((a.identity_key, b.identity_key))
+        return IdentityHypothesis(
+            hypothesis_id=hypothesis_id(a.identity_key, b.identity_key),
+            key_a=lo,
+            key_b=hi,
+            confidence=0.0,
+            reasons=(
+                "co-observation veto: both identities present within "
+                f"{ctx.window_s:.0f}s — two distinct radios seen live",
+            ),
+            status=STATUS_REJECTED,
+            created_ts=now,
+            updated_ts=now,
+        )
 
     shared = len(set(a.probe_ssids) & set(b.probe_ssids))
     confidence = 0.0

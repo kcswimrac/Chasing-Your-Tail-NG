@@ -170,6 +170,44 @@ def test_extract_gps_from_device_json():
     assert abs(lon + 112.07) < 0.01
 
 
+def test_extract_gps_falls_back_to_last_time_never_wall_clock():
+    """S6: no location stamp — the device record's last_time, never the wall clock."""
+    dd = {
+        "kismet.device.base.location": {
+            "kismet.common.location.geopoint": [-112.07, 33.45],
+        },
+        "kismet.device.base.last_time": 1700000123.0,
+    }
+    r = extract_gps_from_device_json(dd, now=1700000999.0)
+    assert r is not None
+    _, _, ts = r
+    assert ts == 1700000123.0
+
+
+def test_extract_gps_row_ts_beats_missing_stamps():
+    """S6: the device pull row's last_time covers records without any stamp."""
+    dd = {
+        "kismet.device.base.location": {
+            "kismet.common.location.geopoint": [-112.07, 33.45],
+        }
+    }
+    r = extract_gps_from_device_json(dd, now=1700000999.0, row_ts=1700000555.0)
+    assert r is not None
+    assert r[2] == 1700000555.0
+
+
+def test_extract_gps_without_any_stamp_uses_injected_clock():
+    """S6: under replay the injected cycle clock is the last resort."""
+    dd = {
+        "kismet.device.base.location": {
+            "kismet.common.location.geopoint": [-112.07, 33.45],
+        }
+    }
+    r = extract_gps_from_device_json(dd, now=1700000999.0)
+    assert r is not None
+    assert r[2] == 1700000999.0
+
+
 def test_ie_fingerprint_relink(tmp_path: Path):
     store = CytStore.open({"path": str(tmp_path / "cyt.db"), "mode": "durable"})
     store.begin_session()

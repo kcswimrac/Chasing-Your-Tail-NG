@@ -35,6 +35,10 @@ SEALED_VERSION = 1
 FIELD_PREFIX = "enc:v1:"
 KDF_ITERATIONS = 200_000
 
+# Dev-only override: explicitly accept a weak key-file mode. Never set in
+# the field — a group/world-readable key undoes the encryption it unlocks.
+WEAK_KEY_MODE_ENV = "CYT_ALLOW_WEAK_KEY_MODE"
+
 
 class CryptoError(Exception):
     pass
@@ -72,7 +76,47 @@ def _kdf(password: bytes, salt: bytes) -> bytes:
     return kdf.derive(password)
 
 
+def key_mode_violation(path: Path) -> Optional[str]:
+    """Describe why a key file's mode is unsafe, or None when acceptable.
+
+    The store key protects every encrypted field and the sealed DB; a
+    group- or world-readable key file undoes the encryption it unlocks
+    (audit S4). Only the owner may read or write it.
+    """
+    try:
+        st = path.stat()
+    except OSError as e:
+        return f"cannot stat key file {path}: {e}"
+    if st.st_mode & 0o077:
+        return (
+            f"key file {path} is group/world-readable "
+            f"(mode {oct(st.st_mode & 0o777)}) — chmod 600 it"
+        )
+    return None
+
+
+def _ensure_safe_key_mode(path: Path) -> None:
+    """Fail closed on a group/world-readable key file (S4).
+
+    The refusal is the feature: a silently-accepted weak key keeps the
+    deployment running with no protection at all. CYT_ALLOW_WEAK_KEY_MODE=1
+    is the explicit dev-only escape hatch and logs loudly when used.
+    """
+    violation = key_mode_violation(path)
+    if violation is None:
+        return
+    if os.environ.get(WEAK_KEY_MODE_ENV) == "1":
+        logger.warning(
+            "%s is set — accepting weak key mode (dev only): %s",
+            WEAK_KEY_MODE_ENV,
+            violation,
+        )
+        return
+    raise CryptoError(f"refusing to load key file: {violation}")
+
+
 def load_key_from_file(path: Path) -> bytes:
+    _ensure_safe_key_mode(path)
     data = path.read_bytes().strip()
     if len(data) == 32:
         return data

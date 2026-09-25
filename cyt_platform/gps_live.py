@@ -128,8 +128,21 @@ class _ClusterAnchor:
 ANCHOR_REGISTRY_CAP = 512
 
 
-def extract_gps_from_device_json(device_data: dict) -> Optional[Tuple[float, float, float]]:
-    """Return (lat, lon, ts) if device JSON has location."""
+def extract_gps_from_device_json(
+    device_data: dict,
+    now: Optional[float] = None,
+    row_ts: Optional[float] = None,
+) -> Optional[Tuple[float, float, float]]:
+    """Return (lat, lon, ts) if device JSON has location.
+
+    Timestamp provenance (S6): the location block's own stamp when present
+    (``kismet.common.location.time_sec`` / ``time``), else the device
+    record's ``kismet.device.base.last_time``, else ``row_ts`` (the pull
+    row's last_time), else the caller's injected cycle clock ``now``. The
+    wall clock is read only when the caller injects nothing — under replay
+    a wall-clock stamp lands far outside the scenario clock and silently
+    zeroes detection.
+    """
     if not device_data:
         return None
     # Common Kismet paths
@@ -170,11 +183,21 @@ def extract_gps_from_device_json(device_data: dict) -> Optional[Tuple[float, flo
         return None
     if abs(lat_f) < 0.0001 and abs(lon_f) < 0.0001:
         return None
-    ts = loc.get("kismet.common.location.time_sec") or loc.get("time") or time.time()
+    ts = loc.get("kismet.common.location.time_sec") or loc.get("time")
+    if ts is None:
+        # S6: no location stamp — fall back to the device record's own
+        # last_time, never the wall clock.
+        ts = device_data.get("kismet.device.base.last_time")
+    if ts is None and row_ts is not None:
+        ts = row_ts
+    if ts is None and now is not None:
+        ts = now
     try:
         ts_f = float(ts)
     except (TypeError, ValueError):
-        ts_f = time.time()
+        ts_f = float(now) if now is not None else time.time()
+    if not ts_f > 0:
+        ts_f = float(now) if now is not None else time.time()
     return lat_f, lon_f, ts_f
 
 
@@ -268,8 +291,13 @@ class LiveGpsFusion:
         lat: float,
         lon: float,
         payload: dict,
+        recorded_ts: Optional[float] = None,
     ) -> None:
-        """Persist one located observation through the CytStore API (D1)."""
+        """Persist one located observation through the CytStore API (D1).
+
+        ``recorded_ts`` carries the caller's cycle clock so the store's
+        recorded_at column never drifts to wall time under replay (S6).
+        """
         from cyt_platform import observations as obs  # lazy: obs imports this module
 
         session_id = self.store.get_runtime("session_id")
@@ -281,6 +309,8 @@ class LiveGpsFusion:
                 cycle_id=self._cycle_counter,
                 session_id=session_id,
             )
+            if rec is not None and recorded_ts is not None:
+                rec["recorded_ts"] = float(recorded_ts)
         else:
             rec = {
                 "ts": float(ts),
@@ -296,6 +326,7 @@ class LiveGpsFusion:
                 "session_id": session_id,
                 "lat": lat,
                 "lon": lon,
+                "recorded_ts": float(recorded_ts) if recorded_ts is not None else None,
             }
         if rec is None:
             return
@@ -332,7 +363,9 @@ class LiveGpsFusion:
         located: List[Tuple[str, float, float, float]] = []
         for d in devices:
             dd = d.get("device_data") or {}
-            extracted = extract_gps_from_device_json(dd)
+            extracted = extract_gps_from_device_json(
+                dd, now=now, row_ts=d.get("last_time")
+            )
             if not extracted:
                 continue
             lat, lon, ts = extracted
@@ -351,6 +384,7 @@ class LiveGpsFusion:
                     lat=lat,
                     lon=lon,
                     payload={},
+                    recorded_ts=now,
                 )
 
         if best is None:
@@ -371,6 +405,7 @@ class LiveGpsFusion:
             lat=best.lat,
             lon=best.lon,
             payload={"device_source": best.source},
+            recorded_ts=now,
         )
         for mac, lat, lon, ts in located:
             place = self._place_id(lat, lon, ts)
