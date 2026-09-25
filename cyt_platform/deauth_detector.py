@@ -18,6 +18,7 @@ from collections import defaultdict
 from pathlib import Path
 
 from cyt_platform.kismet_ro import (
+    WATERMARK_SKEW_ALLOWANCE_S,
     connect_readonly,
     coerce_watermark,
     scan_start_from_watermark,
@@ -97,6 +98,15 @@ class DeauthDetector:
         self.catchup_window_seconds = float(
             deauth_config.get('catchup_window_seconds', 1800)
         )
+        # Attack classification window: events older than this are pruned
+        # from memory, so severity reflects recent frame rates rather than
+        # process lifetime — and a restarted process (cold event list)
+        # classifies like a long-lived one. Keep it <=
+        # catchup_window_seconds (the deepest look-back any process can
+        # read) so in-memory state and fresh-process state converge.
+        self.attack_window_seconds = float(
+            deauth_config.get('attack_window_seconds', 1800)
+        )
 
         # Protected devices (your own MACs to watch)
         self.protected_macs = set(
@@ -114,6 +124,10 @@ class DeauthDetector:
         self.attacks: List[DeauthAttack] = []
         self.last_scan_time: float = 0.0
         self.last_scan_error: Optional[str] = None
+        # S10: reason code from the most recent scan when the persisted
+        # watermark looked untrusted (far ahead of the analyzer's clock);
+        # None when the last scan saw nothing anomalous.
+        self.last_clock_anomaly: Optional[str] = None
         persisted = coerce_watermark(
             watermark_loader() if watermark_loader else None
         )
@@ -146,6 +160,22 @@ class DeauthDetector:
                 # (and re-deduped) next cycle rather than skipped.
                 logger.error("Failed to persist deauth watermark: %s", e)
 
+    def _repair_watermark(self, now_val: float) -> None:
+        """Trust the watermark again from ``now_val`` after a clock anomaly.
+
+        Overrides a polluted far-ahead value unconditionally — the normal
+        monotonic advance guard would keep that value forever. Called only
+        after a clean scan, whose catch-up-fallback read covered everything
+        up to ``now_val``.
+        """
+        self.last_scan_time = now_val
+        if self._watermark_saver is not None:
+            try:
+                self._watermark_saver(now_val)
+            except Exception as e:
+                # Same safe direction as _advance_watermark.
+                logger.error("Failed to persist deauth watermark: %s", e)
+
     def scan_kismet_db(
         self, db_path: str, now: Optional[float] = None
     ) -> List[DeauthEvent]:
@@ -155,6 +185,19 @@ class DeauthDetector:
         """
         new_events = []
         self.last_scan_error = None
+        now_val = time.time() if now is None else float(now)
+
+        # S10: a persisted watermark far ahead of the analyzer's clock comes
+        # from a forward clock jump (corrected later), not from processed
+        # data. Surface it for the health registry; the read itself fell
+        # back to the bounded catch-up window (kismet_ro) and the stored
+        # value is repaired after a clean scan below — the monotonic advance
+        # guard would otherwise keep the polluted value forever.
+        self.last_clock_anomaly = (
+            "clock_ahead"
+            if self.last_scan_time > now_val + WATERMARK_SKEW_ALLOWANCE_S
+            else None
+        )
 
         try:
             conn = connect_readonly(db_path)
@@ -172,8 +215,14 @@ class DeauthDetector:
             self.last_scan_error = f"scan_error: {e}"
             logger.error("Error scanning for deauth events: %s", e)
 
-        # Deduplicate by timestamp+target+source
-        seen = set()
+        # Deduplicate by timestamp+target+source — within this scan AND
+        # against remembered events: an untrusted-watermark re-read (clock
+        # jump corrected, see kismet_ro) must not double-count events
+        # already in memory, or windowed severity would inflate.
+        seen = {
+            (round(e.timestamp, 1), e.target_mac, e.source_mac)
+            for e in self.events
+        }
         unique_events = []
         for event in new_events:
             key = (round(event.timestamp, 1), event.target_mac, event.source_mac)
@@ -182,16 +231,34 @@ class DeauthDetector:
                 unique_events.append(event)
 
         self.events.extend(unique_events)
+        self._prune_events(now_val)
 
         # Watermark advances on clean scans only; a failed scan must not
         # skip past data it could not read.
-        if self.last_scan_error is None and unique_events:
-            self._advance_watermark(
-                max(event.timestamp for event in unique_events)
-            )
+        if self.last_scan_error is None:
+            if self.last_clock_anomaly:
+                self._repair_watermark(now_val)
+            if unique_events:
+                self._advance_watermark(
+                    max(event.timestamp for event in unique_events)
+                )
 
         logger.info(f"Deauth scan found {len(unique_events)} new events")
         return unique_events
+
+    def _prune_events(self, now: float) -> None:
+        """Drop events older than the attack window.
+
+        analyze_attacks() rebuilds the attack list from this list every
+        cycle; without a bound, a long quiet tail keeps old events alive
+        for the process lifetime, so severity escalates on total history
+        and every cycle re-files the same stale attack (close/reopen
+        churn, restart-divergent counts). Pruning to the attack window
+        makes classification a function of recent frame rates that a
+        restarted process reproduces from a cold list.
+        """
+        cutoff = now - self.attack_window_seconds
+        self.events = [e for e in self.events if e.timestamp >= cutoff]
 
     def _scan_alerts_table(
         self, conn: sqlite3.Connection, now: Optional[float] = None

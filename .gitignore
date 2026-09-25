@@ -26,3 +26,4 @@ data/run/
 **/led.state
 **/led.json
 **/status.json
+surveillance_analysis.log

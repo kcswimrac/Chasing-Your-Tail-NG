@@ -29,8 +29,16 @@ def connect_readonly(db_path: str, timeout: float = 30.0) -> sqlite3.Connection:
     return conn
 
 
+# A watermark this far ahead of the analyzer's clock is a clock anomaly (a
+# forward clock jump that was later corrected): reads treat it as untrusted.
+WATERMARK_SKEW_ALLOWANCE_S = 300.0
+
+
 def scan_start_from_watermark(
-    watermark: float, now: float, catchup_window_s: float
+    watermark: float,
+    now: float,
+    catchup_window_s: float,
+    skew_allowance_s: float = WATERMARK_SKEW_ALLOWANCE_S,
 ) -> float:
     """Compute the earliest timestamp a detector scan should read.
 
@@ -40,7 +48,19 @@ def scan_start_from_watermark(
     (service down a long time) or missing, the look-back is capped at
     ``catchup_window_s`` from ``now`` so a start against a stale capture DB
     cannot replay days of history as fresh.
+
+    A watermark far ahead of ``now`` means the capture host's clock ran
+    fast and was later corrected: rows below the watermark were stamped by
+    the wrong clock, not actually processed, so the watermark is untrusted.
+    Clamping it to ``now + allowance`` would leave the scan start ahead of
+    the wall clock and detection blind until the clock caught up; instead
+    the read falls back to the bounded catch-up window so real-time rows
+    are seen again immediately. Re-read alerts re-file idempotently (the
+    runner keys filings on the attack's last_seen), and the anomaly is
+    reported as a ``clock`` component failure (health.clock_skew_reason).
     """
+    if watermark > now + skew_allowance_s:
+        watermark = 0.0
     floor = max(0.0, now - catchup_window_s)
     return max(watermark, floor)
 

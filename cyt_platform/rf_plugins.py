@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import time
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from cyt_platform.detectors import (
     DetectionResult,
@@ -22,6 +22,7 @@ from cyt_platform.privacy import sanitize_error
 from cyt_platform.health import (
     GPS_DROPOUT_DEFAULT_SECONDS,
     ComponentFailureRegistry,
+    clock_skew_reason,
     gps_dropout_reason,
 )
 
@@ -44,6 +45,12 @@ SCAN_SEVERITY_MAP = {
 # transaction that commits the derived incidents.
 DEAUTH_WATERMARK_KEY = "deauth_alert_watermark_ts"
 ROGUE_WATERMARK_KEY = "rogue_ap_alert_watermark_ts"
+
+# Per-cycle cap on deauth attack filings. analyze_attacks() sorts
+# severity-critical first, so the head is kept — the old tail slice
+# (attacks[-20:]) dropped the most severe attack exactly when the list
+# overflowed.
+MAX_DEAUTH_FILINGS_PER_CYCLE = 20
 
 
 def _runtime_watermark_loader(
@@ -162,6 +169,10 @@ class RFPluginRunner:
         )
         self.gps_dropout_min_cycles = int(gps_cfg.get("dropout_min_cycles") or 0)
         self._gps_cycles_seen = 0
+        # B4: last filed last_seen per (target, attacker) — deauth filing is
+        # idempotent per advance of the attack's newest frame, so quiet
+        # cycles never re-file (or re-open) an unchanged attack.
+        self._deauth_filed: Dict[Tuple[str, str], float] = {}
         self.deauth = None
         self.rogue = None
         self.ie = None
@@ -335,8 +346,7 @@ class RFPluginRunner:
                     attacks = self.deauth.analyze_attacks() or []
                 elif hasattr(self.deauth, "attacks"):
                     attacks = self.deauth.attacks or []
-                for atk in attacks[-20:]:
-                    self._incident_from_deauth(atk, now)
+                self._file_deauth_attacks(attacks, now)
                 # scan_kismet_db records its own last_scan_error (e.g. a
                 # read/parse failure while the file itself opened); count
                 # that as a plugin failure too so status cannot read clear.
@@ -345,6 +355,25 @@ class RFPluginRunner:
                     self.registry.record_failure("detector:deauth", scan_err, now)
                 else:
                     self._clear_failure("detector:deauth", now)
+                # S10: a watermark or captured event stamped ahead of the
+                # analyzer's clock (a forward jump, later corrected) is a
+                # clock anomaly — visible as its own failing component,
+                # never silently applied. The read side already treats such
+                # a watermark as untrusted
+                # (kismet_ro.scan_start_from_watermark), and the detector
+                # repairs the stored value after a clean scan; the anomaly
+                # flag it raised is reported here.
+                skew = getattr(self.deauth, "last_clock_anomaly", None) or clock_skew_reason(
+                    watermark=getattr(self.deauth, "last_scan_time", None),
+                    newest_event_ts=max(
+                        (e.timestamp for e in (events or [])), default=None
+                    ),
+                    now=now,
+                )
+                if skew:
+                    self.registry.record_failure("clock", skew, now)
+                else:
+                    self._clear_failure("clock", now)
             except Exception as e:
                 detail = self._record_failure("detector:deauth", e, ts=now)
                 logger.warning("deauth scan error: %s", detail)
@@ -371,6 +400,34 @@ class RFPluginRunner:
         # it straight to status composition (never clear while failing).
         stats["detector_failures"] = self.registry.failures()
         return stats
+
+    def _file_deauth_attacks(self, attacks: List[Any], now: float) -> List[Any]:
+        """File deauth attacks through the contract, once per last_seen advance.
+
+        analyze_attacks() rebuilds the attack list from the windowed
+        in-memory event list every cycle, so the same attack reappears until
+        its events age out. Filing is keyed on (target, attacker) and
+        idempotent on the attack's last_seen: an attack whose newest frame
+        was already filed is skipped, so quiet cycles never re-file — and
+        never re-open a stale-closed — incident, and observation_count only
+        grows with genuinely new frames. The head slice keeps the
+        severity-sorted most severe attacks; the old tail slice dropped the
+        worst attack exactly when the list overflowed. Returns the attacks
+        actually filed this cycle.
+        """
+        filed = []
+        for atk in attacks[:MAX_DEAUTH_FILINGS_PER_CYCLE]:
+            key = (
+                str(getattr(atk, "target_mac", "?")).upper(),
+                str(getattr(atk, "attacker_mac", "?")).upper(),
+            )
+            last_seen = getattr(atk, "last_seen", 0.0) or 0.0
+            if last_seen <= self._deauth_filed.get(key, float("-inf")):
+                continue
+            self._incident_from_deauth(atk, now)
+            self._deauth_filed[key] = last_seen
+            filed.append(atk)
+        return filed
 
     def _incident_from_deauth(self, atk: Any, now: float) -> None:
         """Emit one deauth detection through the contract (D6).

@@ -1,0 +1,191 @@
+{
+  "scenario_version": 1,
+  "scenario_id": "deauth-quiet-tail-restart-stable",
+  "description": "A targeted deauth attack, a quiet tail longer than close_after_seconds (the incident closes once and is never re-filed — no close/reopen churn), a mid-session restart, and a fresh burst beyond the attack window that legitimately reopens the incident. The attack list is windowed and filing is idempotent on the attack's last_seen, so the long-lived process and the restarted one classify identically: the first burst's events have aged out of the attack window before the second burst lands, leaving exactly two frames in view for both runs.",
+  "session_id": "replay-deauth-quiet-tail-restart-stable",
+  "labels": {
+    "kind": "suspicious",
+    "expect": {
+      "detect": true,
+      "state": "watch",
+      "max_latency_cycles": 1,
+      "entity_keys": [
+        "AA:BB:CC:00:00:42"
+      ],
+      "max_incidents": 1
+    }
+  },
+  "config_overrides": {
+    "deauth_detection": {
+      "min_events_for_attack": 2
+    },
+    "incidents": {
+      "close_after_seconds": 600
+    }
+  },
+  "restarts": [
+    6
+  ],
+  "cycles": [
+    {
+      "cycle_id": 1,
+      "clock_ts": 1700000000.0,
+      "rows": [
+        {
+          "source": "kismet.alerts",
+          "row": {
+            "ts_sec": 1699999995.0,
+            "header": "DEAUTH",
+            "json": {
+              "kismet.alert.header": "DEAUTH",
+              "kismet.alert.text": "Detected deauthentication attack",
+              "kismet.alert.source_mac": "AA:BB:CC:0D:00:99",
+              "kismet.alert.dest_mac": "AA:BB:CC:00:00:42",
+              "kismet.alert.channel": 6
+            },
+            "src_mac": "AA:BB:CC:0D:00:99",
+            "dst_mac": "AA:BB:CC:00:00:42",
+            "bssid": ""
+          }
+        },
+        {
+          "source": "kismet.alerts",
+          "row": {
+            "ts_sec": 1699999998.0,
+            "header": "DEAUTH",
+            "json": {
+              "kismet.alert.header": "DEAUTH",
+              "kismet.alert.text": "Detected deauthentication attack",
+              "kismet.alert.source_mac": "AA:BB:CC:0D:00:99",
+              "kismet.alert.dest_mac": "AA:BB:CC:00:00:42",
+              "kismet.alert.channel": 6
+            },
+            "src_mac": "AA:BB:CC:0D:00:99",
+            "dst_mac": "AA:BB:CC:00:00:42",
+            "bssid": ""
+          }
+        }
+      ]
+    },
+    {
+      "cycle_id": 2,
+      "clock_ts": 1700000120.0,
+      "rows": []
+    },
+    {
+      "cycle_id": 3,
+      "clock_ts": 1700000240.0,
+      "rows": []
+    },
+    {
+      "cycle_id": 4,
+      "clock_ts": 1700000360.0,
+      "rows": []
+    },
+    {
+      "cycle_id": 5,
+      "clock_ts": 1700000480.0,
+      "rows": []
+    },
+    {
+      "cycle_id": 6,
+      "clock_ts": 1700000600.0,
+      "rows": []
+    },
+    {
+      "cycle_id": 7,
+      "clock_ts": 1700000720.0,
+      "rows": []
+    },
+    {
+      "cycle_id": 8,
+      "clock_ts": 1700000840.0,
+      "rows": []
+    },
+    {
+      "cycle_id": 9,
+      "clock_ts": 1700000960.0,
+      "rows": []
+    },
+    {
+      "cycle_id": 10,
+      "clock_ts": 1700001080.0,
+      "rows": []
+    },
+    {
+      "cycle_id": 11,
+      "clock_ts": 1700001200.0,
+      "rows": []
+    },
+    {
+      "cycle_id": 12,
+      "clock_ts": 1700001320.0,
+      "rows": []
+    },
+    {
+      "cycle_id": 13,
+      "clock_ts": 1700001440.0,
+      "rows": []
+    },
+    {
+      "cycle_id": 14,
+      "clock_ts": 1700001560.0,
+      "rows": []
+    },
+    {
+      "cycle_id": 15,
+      "clock_ts": 1700001680.0,
+      "rows": []
+    },
+    {
+      "cycle_id": 16,
+      "clock_ts": 1700001800.0,
+      "rows": []
+    },
+    {
+      "cycle_id": 17,
+      "clock_ts": 1700001920.0,
+      "rows": [
+        {
+          "source": "kismet.alerts",
+          "row": {
+            "ts_sec": 1700001915.0,
+            "header": "DEAUTH",
+            "json": {
+              "kismet.alert.header": "DEAUTH",
+              "kismet.alert.text": "Detected deauthentication attack",
+              "kismet.alert.source_mac": "AA:BB:CC:0D:00:99",
+              "kismet.alert.dest_mac": "AA:BB:CC:00:00:42",
+              "kismet.alert.channel": 6
+            },
+            "src_mac": "AA:BB:CC:0D:00:99",
+            "dst_mac": "AA:BB:CC:00:00:42",
+            "bssid": ""
+          }
+        },
+        {
+          "source": "kismet.alerts",
+          "row": {
+            "ts_sec": 1700001918.0,
+            "header": "DEAUTH",
+            "json": {
+              "kismet.alert.header": "DEAUTH",
+              "kismet.alert.text": "Detected deauthentication attack",
+              "kismet.alert.source_mac": "AA:BB:CC:0D:00:99",
+              "kismet.alert.dest_mac": "AA:BB:CC:00:00:42",
+              "kismet.alert.channel": 6
+            },
+            "src_mac": "AA:BB:CC:0D:00:99",
+            "dst_mac": "AA:BB:CC:00:00:42",
+            "bssid": ""
+          }
+        }
+      ]
+    },
+    {
+      "cycle_id": 18,
+      "clock_ts": 1700002040.0,
+      "rows": []
+    }
+  ]
+}
