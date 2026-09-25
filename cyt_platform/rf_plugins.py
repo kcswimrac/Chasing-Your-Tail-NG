@@ -295,11 +295,22 @@ class RFPluginRunner:
             "cotravel": 0,
             "gps": None,
         }
+        pull_ok = True
         try:
             devices = kdb.get_devices_by_time_range(now - recent_window_s)
         except Exception as e:
-            logger.debug("rf plugins device pull failed: %s", e)
+            # B5: the shared device pull feeds IE and BLE (and the device
+            # list side of GPS). Substituting an empty list at debug level
+            # let the cycle read clear while blind — downstream consumers
+            # then cleared their own health on the empty input. The failed
+            # pull is its own failing component, and IE/BLE are skipped
+            # (never run on a list that was not pulled, never cleared).
+            pull_ok = False
+            detail = self._record_failure("device_feed", e, ts=now)
+            logger.warning("device pull failed: %s", detail)
             devices = []
+        else:
+            self._clear_failure("device_feed", now)
 
         # GPS + co-travel
         if self.gps:
@@ -320,15 +331,17 @@ class RFPluginRunner:
                 detail = self._record_failure("gps", e, ts=now)
                 logger.warning("gps fusion error: %s", detail)
 
-        # IE + BLE on same device set
-        if self.ie:
+        # IE + BLE on same device set — only when the shared pull produced
+        # one: a cycle whose input pull failed must neither run nor clear
+        # them (B5); their health carries over untouched.
+        if self.ie and pull_ok:
             try:
                 stats["ie_links"] = self.ie.process_devices(devices, now)
                 self._clear_failure("detector:ie", now)
             except Exception as e:
                 detail = self._record_failure("detector:ie", e, ts=now)
                 logger.warning("ie fingerprint error: %s", detail)
-        if self.ble:
+        if self.ble and pull_ok:
             try:
                 stats["ble_hits"] = self.ble.process_devices(devices, now)
                 self._clear_failure("detector:ble", now)

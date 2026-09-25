@@ -19,6 +19,7 @@ from cyt_platform.incidents import (
     transition,
 )
 from cyt_platform.led import read_status
+from cyt_platform.status import effective_state
 from cyt_platform.store import CytStore
 
 # disposition verb -> terminal lifecycle state the operator asserts
@@ -45,14 +46,27 @@ def status_report(config: dict, store: CytStore) -> dict:
         (config.get("status") or {}).get("file") or "data/run/status.json"
     )
     snap = read_status(status_file) or {}
+    # S11: the CLI displays the effective (staleness-honoring) state, not
+    # the raw snapshot state — a dead or parked publisher must not read
+    # clear. Empty snapshot (no file) keeps the unknown-state path below.
+    if snap:
+        state, reason = effective_state(
+            snap,
+            now=time.time(),
+            stale_seconds=float(
+                (config.get("status") or {}).get("stale_seconds") or 150
+            ),
+        )
+    else:
+        state, reason = None, None
     inputs = store.get_status_inputs(
         float((config.get("status") or {}).get("hold_seconds") or 300)
     )
     active = store.active_phenomenon_incidents()
     return {
         "status_file": str(status_file),
-        "state": snap.get("state"),
-        "reason": snap.get("reason"),
+        "state": state,
+        "reason": reason,
         "counts": snap.get("counts"),
         "watch_open": inputs.watch_open,
         "alert_open": inputs.alert_open,

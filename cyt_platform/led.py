@@ -2,10 +2,15 @@
 Glanceable LED / status consumer (P1).
 
 Maps status.json state → LED mode and publishes:
-  - data/run/led.state   plain text: green|amber|red_blink|red_solid|off
+  - data/run/led.state   plain text: green|amber|amber_blink|red_blink|red_solid|off
   - data/run/led.json   structured
   - console (optional)
   - optional sysfs or GPIO backends
+
+S11: the LED displays the staleness-honoring state — a dead or parked
+publisher reads ``fail`` (red_solid), never its last written state — and
+``degraded`` has its own pattern (amber_blink), distinct from watch
+(amber) and from "no status file" (off).
 """
 
 from __future__ import annotations
@@ -16,11 +21,14 @@ import time
 from pathlib import Path
 from typing import Optional
 
+from cyt_platform.status import effective_state
+
 logger = logging.getLogger(__name__)
 
 STATE_MAP = {
     "clear": "green",
     "watch": "amber",
+    "degraded": "amber_blink",
     "alert": "red_blink",
     "fail": "red_solid",
 }
@@ -78,6 +86,7 @@ def apply_sysfs(led: str, sysfs_path: Optional[str]) -> None:
     brightness = {
         "green": "1",
         "amber": "1",
+        "amber_blink": "1",
         "red_blink": "1",
         "red_solid": "1",
         "off": "0",
@@ -103,7 +112,7 @@ def apply_gpio(led: str, gpio_cfg: dict) -> None:
     try:
         GPIO.setmode(GPIO.BCM)
         GPIO.setup(int(pin), GPIO.OUT)
-        on = led in ("green", "amber", "red_blink", "red_solid")
+        on = led in ("green", "amber", "amber_blink", "red_blink", "red_solid")
         GPIO.output(int(pin), GPIO.HIGH if on else GPIO.LOW)
     except Exception as e:
         logger.debug("GPIO LED failed: %s", e)
@@ -113,6 +122,7 @@ def ansi_line(led: str, state: str, reason: str) -> str:
     colors = {
         "green": "\033[32m",
         "amber": "\033[33m",
+        "amber_blink": "\033[33;1m",
         "red_blink": "\033[31m",
         "red_solid": "\033[31;1m",
         "off": "\033[90m",
@@ -129,7 +139,9 @@ def run_led_loop(
     interval: float = 1.0,
     console: bool = True,
 ) -> int:
-    status_path = Path((config.get("status") or {}).get("file") or "data/run/status.json")
+    status_cfg = config.get("status") or {}
+    status_path = Path(status_cfg.get("file") or "data/run/status.json")
+    stale_seconds = float(status_cfg.get("stale_seconds") or 150)
     runtime = Path((config.get("paths") or {}).get("runtime_dir") or "data/run")
     led_cfg = config.get("led") or {}
     sysfs = led_cfg.get("sysfs_brightness")
@@ -141,9 +153,16 @@ def run_led_loop(
             led = "off"
             state, reason = "unknown", "no_status"
         else:
-            state = snap.get("state") or "unknown"
-            reason = snap.get("reason") or ""
+            # S11: a stale snapshot is a dead or parked publisher — display
+            # fail, never the last written state. The wall clock is correct
+            # here: the LED is a consumer, not detection logic.
+            state, reason = effective_state(
+                snap, now=time.time(), stale_seconds=stale_seconds
+            )
             led = state_to_led(state)
+            # led.json describes what the LED is displaying: the effective
+            # (staleness-honoring) state, not the raw snapshot's.
+            snap = {**snap, "state": state, "reason": reason}
 
         # D8: file writes and hardware blips happen only on LED state change.
         if update_led_files(runtime, led, snap):

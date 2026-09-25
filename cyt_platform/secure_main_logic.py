@@ -5,6 +5,9 @@ import logging
 import time
 from dataclasses import dataclass
 from typing import Callable, List, Dict, Optional, Set
+
+from cyt_platform.health import ComponentFailureRegistry
+from cyt_platform.privacy import sanitize_error
 from cyt_platform.secure_database import SecureKismetDB, SecureTimeWindows
 
 logger = logging.getLogger(__name__)
@@ -31,6 +34,7 @@ class SecureCYTMonitor:
         ssid_ignore_list: List[str],
         log_file,
         on_match: Optional[Callable[[MatchEvent], None]] = None,
+        registry: Optional[ComponentFailureRegistry] = None,
     ):
         self.config = config
         self.ignore_list = set(mac.upper() for mac in ignore_list)  # Convert to set for O(1) lookup
@@ -39,6 +43,15 @@ class SecureCYTMonitor:
         self.time_manager = SecureTimeWindows(config)
         self.on_match = on_match
         self.current_kismet_db: str = ""
+        # B5: the window matcher reports its own health into the shared
+        # component registry (None → standalone use, nothing composed).
+        self.registry = registry
+        # Per-operation outcome: detector:window clears only when both the
+        # cycle read (process) and the list refresh (rotate) are succeeding
+        # — they hit different Kismet tables, so one can fail while the
+        # other works (partial schema drift) and the failing half must stay
+        # visible instead of being cleared by its healthy sibling.
+        self._window_ops: Dict[str, bool] = {"process": True, "rotate": True}
         
         # Initialize tracking lists
         self.past_five_mins_macs: Set[str] = set()
@@ -161,6 +174,22 @@ class SecureCYTMonitor:
             print(message)
             self.log_file.write(f"{message}\n")
     
+    def _window_health(self, op: str, ok: bool, exc: Optional[BaseException]) -> None:
+        """Report one window-matcher operation into the health registry (B5).
+
+        ``detector:window`` clears only when every operation of the matcher
+        reports success — see _window_ops.
+        """
+        if self.registry is None:
+            return
+        self._window_ops[op] = ok
+        if not ok:
+            self.registry.record_failure(
+                "detector:window", f"{op}: {sanitize_error(exc)}"
+            )
+        elif all(self._window_ops.values()):
+            self.registry.record_success("detector:window")
+
     def process_current_activity(self, db: SecureKismetDB) -> None:
         """Process current activity and detect matches"""
         try:
@@ -183,7 +212,13 @@ class SecureCYTMonitor:
                 self._process_mac_tracking(mac)
                 
         except Exception as e:
-            logger.error(f"Error processing current activity: {e}")
+            # B5: a blind window matcher must be visible — register the
+            # failure instead of letting the cycle read clear while unable
+            # to see. The service loop still survives (logged, not raised).
+            self._window_health("process", False, e)
+            logger.error("Error processing current activity: %s", sanitize_error(e))
+        else:
+            self._window_health("process", True, None)
     
     def _process_probe_requests(self, device_data: Dict, mac: str) -> None:
         """Process probe requests from device data"""
@@ -293,7 +328,13 @@ class SecureCYTMonitor:
             self._log_rotation_stats()
             
         except Exception as e:
-            logger.error(f"Error rotating tracking lists: {e}")
+            # B5: same visibility contract as process_current_activity — a
+            # failed list refresh means the matcher's current list is going
+            # stale, which must not read as a quiet capture.
+            self._window_health("rotate", False, e)
+            logger.error("Error rotating tracking lists: %s", sanitize_error(e))
+        else:
+            self._window_health("rotate", True, None)
     
     def _log_rotation_stats(self) -> None:
         """Log rotation statistics"""
